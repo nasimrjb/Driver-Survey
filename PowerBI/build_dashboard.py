@@ -263,9 +263,11 @@ def page2_satisfaction(views):
 
     # --- Honeymoon Effect ---
     tenure_order = [
-        "1_to_3_months", "3_to_6_months", "6_months_to_1_year",
-        "1_to_3_years", "3_to_5_years", "5_to_7_years", "more_than_7_years",
-        "less_than_1_month", "more_than_4_years"
+        "less_than_1_month", "1_to_3_months", "less_than_3_months",
+        "3_to_6_months", "6_months_to_1_year", "6_to_12_months",
+        "1_to_2_years", "1_to_3_years", "2_to_3_years",
+        "3_to_4_years", "3_to_5_years", "more_than_4_years",
+        "5_to_7_years", "more_than_7_years",
     ]
     hm_sorted = hm.copy()
     hm_sorted["sort_key"] = hm_sorted["tenure"].apply(
