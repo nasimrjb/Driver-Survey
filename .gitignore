@@ -1,0 +1,16 @@
+# Ignore everything
+*
+
+# But track these file types
+!*.sql
+!*.py
+
+# And track .gitignore itself
+!.gitignore
+
+# Allow traversal into subdirectories
+!*/
+
+# Python cache
+__pycache__/
+*.pyc
