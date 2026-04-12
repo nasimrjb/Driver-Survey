@@ -14,6 +14,8 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
+import jdatetime
+from datetime import date, timedelta
 import json, os
 
 # ============================================================
@@ -29,6 +31,55 @@ SNAPP_COLOR = "#00C853"   # Snapp green
 TAPSI_COLOR = "#FF6D00"   # Tapsi orange
 BG_COLOR = "#f8f9fa"
 CARD_BG = "#ffffff"
+
+CITY_ORDER = [
+    "Tehran(city)", "Karaj", "Isfahan", "Shiraz", "Mashhad",
+    "Qom", "Tabriz", "Ahwaz", "Sari", "Rasht",
+    "Urumieh", "Yazd", "Kerman", "Gorgan", "Ghazvin",
+    "Arak", "Kermanshah", "Hamedan", "Ardebil", "Zanjan", "Kish",
+]
+
+PERSIAN_MONTHS = [
+    'Far', 'Ord', 'Kho', 'Tir', 'Mor', 'Sha',
+    'Meh', 'Aba', 'Aza', 'Dey', 'Bah', 'Esf',
+]
+
+def _week_start_saturday(year, weeknum):
+    """Return the Saturday that starts the given Persian week."""
+    jan1 = date(year, 1, 1)
+    days_since_sat = (jan1.weekday() - 5) % 7
+    first_sat = jan1 - timedelta(days=days_since_sat)
+    return first_sat + timedelta(weeks=weeknum - 1)
+
+
+def yearweek_to_persian(yw):
+    """Convert 'YY-WW' yearweek string to a Persian week label like 'W4: 29 Dey-5 Bah'."""
+    try:
+        yy, ww = yw.split('-')
+        yr = 2000 + int(yy)
+        wk = int(ww)
+        sat = _week_start_saturday(yr, wk)
+        fri = sat + timedelta(days=6)
+        j_sat = jdatetime.date.fromgregorian(date=sat)
+        j_fri = jdatetime.date.fromgregorian(date=fri)
+        m1 = PERSIAN_MONTHS[j_sat.month - 1]
+        m2 = PERSIAN_MONTHS[j_fri.month - 1]
+        if m1 == m2:
+            return f"W{wk}: {j_sat.day}-{j_fri.day} {m1}"
+        return f"W{wk}: {j_sat.day} {m1}-{j_fri.day} {m2}"
+    except Exception:
+        return yw
+
+
+def add_persian_week_labels(df, yearweek_col="yearweek"):
+    """Add a 'week_label' column with Persian week descriptions, ordered chronologically."""
+    df = df.copy()
+    df["week_label"] = df[yearweek_col].astype(str).map(yearweek_to_persian)
+    # Build chronological order from the sorted yearweek values
+    ordered_labels = df.sort_values(yearweek_col)["week_label"].unique().tolist()
+    df["week_label"] = pd.Categorical(df["week_label"], categories=ordered_labels, ordered=True)
+    return df
+
 
 def query(sql):
     conn = pyodbc.connect(
@@ -68,8 +119,8 @@ def load_all_views():
 # ============================================================
 def page1_executive(views):
     kpi = views["vw_KPISummary"].iloc[0]
-    ws = views["vw_WeeklySatisfaction"].sort_values("yearweek")
-    nps = views["vw_WeeklyNPS"].sort_values("yearweek")
+    ws = add_persian_week_labels(views["vw_WeeklySatisfaction"].sort_values("yearweek"))
+    nps = add_persian_week_labels(views["vw_WeeklyNPS"].sort_values("yearweek"))
 
     figs = []
 
@@ -116,14 +167,14 @@ def page1_executive(views):
     ]:
         if col in ws.columns:
             fig_sat.add_trace(go.Scatter(
-                x=ws["yearweek"], y=ws[col], name=name,
+                x=ws["week_label"], y=ws[col], name=name,
                 line=dict(color=color, dash=dash, width=2),
                 hovertemplate=f"{name}: %{{y:.2f}}<extra></extra>"
             ), secondary_y=False)
 
     # Joint driver % on secondary axis
     fig_sat.add_trace(go.Scatter(
-        x=ws["yearweek"], y=ws["joint_driver_pct"], name="Joint %",
+        x=ws["week_label"], y=ws["joint_driver_pct"], name="Joint %",
         line=dict(color="#7f8c8d", dash="dot", width=1.5),
         opacity=0.6
     ), secondary_y=True)
@@ -142,7 +193,7 @@ def page1_executive(views):
     nps_valid = nps.dropna(subset=["snapp_nps"])
     fig_nps = go.Figure()
     fig_nps.add_trace(go.Scatter(
-        x=nps_valid["yearweek"], y=nps_valid["snapp_nps"], name="Snapp NPS",
+        x=nps_valid["week_label"], y=nps_valid["snapp_nps"], name="Snapp NPS",
         line=dict(color=SNAPP_COLOR, width=3), mode="lines+markers",
         marker=dict(size=5),
         fill="tozeroy", fillcolor="rgba(0,200,83,0.1)",
@@ -151,7 +202,7 @@ def page1_executive(views):
     nps_tapsi = nps.dropna(subset=["tapsi_nps"])
     if len(nps_tapsi) >= 3:
         fig_nps.add_trace(go.Scatter(
-            x=nps_tapsi["yearweek"], y=nps_tapsi["tapsi_nps"], name="Tapsi NPS",
+            x=nps_tapsi["week_label"], y=nps_tapsi["tapsi_nps"], name="Tapsi NPS",
             line=dict(color=TAPSI_COLOR, width=3), mode="lines+markers",
             marker=dict(size=5),
             fill="tozeroy", fillcolor="rgba(255,109,0,0.1)",
@@ -170,15 +221,15 @@ def page1_executive(views):
     nps_decomp = nps.dropna(subset=["snapp_detractor_pct"])
     fig_nps_decomp = go.Figure()
     fig_nps_decomp.add_trace(go.Scatter(
-        x=nps_decomp["yearweek"], y=nps_decomp["snapp_detractor_pct"], name="Detractors",
+        x=nps_decomp["week_label"], y=nps_decomp["snapp_detractor_pct"], name="Detractors",
         stackgroup="one", line=dict(color="#e74c3c"), fillcolor="rgba(231,76,60,0.4)"
     ))
     fig_nps_decomp.add_trace(go.Scatter(
-        x=nps_decomp["yearweek"], y=nps_decomp["snapp_passive_pct"], name="Passives",
+        x=nps_decomp["week_label"], y=nps_decomp["snapp_passive_pct"], name="Passives",
         stackgroup="one", line=dict(color="#f39c12"), fillcolor="rgba(243,156,18,0.4)"
     ))
     fig_nps_decomp.add_trace(go.Scatter(
-        x=nps_decomp["yearweek"], y=nps_decomp["snapp_promoter_pct"], name="Promoters",
+        x=nps_decomp["week_label"], y=nps_decomp["snapp_promoter_pct"], name="Promoters",
         stackgroup="one", line=dict(color="#27ae60"), fillcolor="rgba(39,174,96,0.4)"
     ))
     fig_nps_decomp.update_layout(
@@ -190,7 +241,7 @@ def page1_executive(views):
 
     # --- Response Count ---
     fig_resp = go.Figure(go.Bar(
-        x=ws["yearweek"], y=ws["response_count"],
+        x=ws["week_label"], y=ws["response_count"],
         marker_color="#3498db", opacity=0.7, name="Responses"
     ))
     fig_resp.update_layout(
@@ -208,10 +259,13 @@ def page1_executive(views):
 # ============================================================
 def page2_satisfaction(views):
     figs = []
-    sc = views["vw_SatisfactionByCity"].sort_values("n", ascending=False).head(15)
+    sc_all = views["vw_SatisfactionByCity"]
+    sc = sc_all[sc_all["city"].isin(CITY_ORDER)].copy()
+    sc["city"] = pd.Categorical(sc["city"], categories=list(reversed(CITY_ORDER)), ordered=True)
+    sc = sc.sort_values("city")
     sd = views["vw_SatisfactionByDemographics"]
     hm = views["vw_HoneymoonEffect"]
-    scw = views["vw_SatisfactionByCityWeek"]
+    scw = add_persian_week_labels(views["vw_SatisfactionByCityWeek"])
 
     # --- Top Cities Satisfaction ---
     fig_city = go.Figure()
@@ -227,8 +281,8 @@ def page2_satisfaction(views):
                 orientation="h", marker_color=color, opacity=0.85
             ))
     fig_city.update_layout(
-        title="Satisfaction by City (Top 15)",
-        barmode="group", height=500,
+        title="Satisfaction by City",
+        barmode="group", height=600,
         xaxis_title="Satisfaction (1-5)", xaxis_range=[1, 5],
         legend=dict(orientation="h", y=-0.12),
         margin=dict(l=120)
@@ -269,11 +323,28 @@ def page2_satisfaction(views):
         "3_to_4_years", "3_to_5_years", "more_than_4_years",
         "5_to_7_years", "more_than_7_years",
     ]
+    tenure_labels = {
+        "less_than_1_month": "< 1 Month",
+        "1_to_3_months": "1-3 Months",
+        "less_than_3_months": "< 3 Months",
+        "3_to_6_months": "3-6 Months",
+        "6_months_to_1_year": "6-12 Months",
+        "6_to_12_months": "6-12 Months",
+        "1_to_2_years": "1-2 Years",
+        "1_to_3_years": "1-3 Years",
+        "2_to_3_years": "2-3 Years",
+        "3_to_4_years": "3-4 Years",
+        "3_to_5_years": "3-5 Years",
+        "more_than_4_years": "4+ Years",
+        "5_to_7_years": "5-7 Years",
+        "more_than_7_years": "7+ Years",
+    }
     hm_sorted = hm.copy()
     hm_sorted["sort_key"] = hm_sorted["tenure"].apply(
         lambda x: tenure_order.index(x.strip()) if x.strip() in tenure_order else 99
     )
     hm_sorted = hm_sorted.sort_values("sort_key")
+    hm_sorted["tenure_label"] = hm_sorted["tenure"].str.strip().map(tenure_labels).fillna(hm_sorted["tenure"])
 
     fig_hon = go.Figure()
     for col, name, color in [
@@ -287,7 +358,7 @@ def page2_satisfaction(views):
             if series.notna().sum() < len(series) * 0.5:
                 continue
             fig_hon.add_trace(go.Scatter(
-                x=hm_sorted["tenure"], y=hm_sorted[col], name=name,
+                x=hm_sorted["tenure_label"], y=hm_sorted[col], name=name,
                 mode="lines+markers", line=dict(color=color, width=2.5),
                 marker=dict(size=8), connectgaps=True
             ))
@@ -299,11 +370,13 @@ def page2_satisfaction(views):
     )
     figs.append(fig_hon)
 
-    # --- City x Week Heatmap (top 12 cities) ---
-    top_cities = scw.groupby("city")["n"].sum().nlargest(12).index.tolist()
-    hm_data = scw[scw["city"].isin(top_cities)].pivot_table(
-        index="city", columns="yearweek", values="snapp_fare_sat"
+    # --- City x Week Heatmap ---
+    label_order = scw.sort_values("yearweek")["week_label"].unique()
+    hm_data = scw[scw["city"].isin(CITY_ORDER)].pivot_table(
+        index="city", columns="week_label", values="snapp_fare_sat"
     )
+    hm_data = hm_data[[c for c in label_order if c in hm_data.columns]]
+    hm_data = hm_data.reindex([c for c in CITY_ORDER if c in hm_data.index])
     fig_heatmap = go.Figure(go.Heatmap(
         z=hm_data.values,
         x=[str(w) for w in hm_data.columns],
@@ -317,8 +390,8 @@ def page2_satisfaction(views):
     ))
     fig_heatmap.update_layout(
         title="Snapp Fare Satisfaction Heatmap: City x Week",
-        height=450, margin=dict(l=120),
-        xaxis_title="Year-Week"
+        height=550, margin=dict(l=120),
+        xaxis_title="Week"
     )
     figs.append(fig_heatmap)
 
@@ -330,26 +403,29 @@ def page2_satisfaction(views):
 # ============================================================
 def page3_incentive(views):
     figs = []
-    iw = views["vw_IncentiveByWeek"].sort_values("yearweek")
+    iw = add_persian_week_labels(views["vw_IncentiveByWeek"].sort_values("yearweek"))
     it = views["vw_WideIncentiveTypes"]
     ur = views["vw_WideUnsatisfactionReasons"]
-    ic = views["vw_IncentiveByCity"].sort_values("n", ascending=False).head(15)
+    ic_all = views["vw_IncentiveByCity"]
+    ic = ic_all[ic_all["city"].isin(CITY_ORDER)].copy()
+    ic["city"] = pd.Categorical(ic["city"], categories=list(reversed(CITY_ORDER)), ordered=True)
+    ic = ic.sort_values("city")
 
     # --- Incentive Amount + Satisfaction over time ---
     fig_inc = make_subplots(specs=[[{"secondary_y": True}]])
     fig_inc.add_trace(go.Bar(
-        x=iw["yearweek"], y=iw["snapp_incentive_avg_mrial"],
+        x=iw["week_label"], y=iw["snapp_incentive_avg_mrial"],
         name="Snapp Incentive (M Rials)",
         marker_color=SNAPP_COLOR, opacity=0.5
     ), secondary_y=False)
     fig_inc.add_trace(go.Scatter(
-        x=iw["yearweek"], y=iw["snapp_inc_sat_avg"],
+        x=iw["week_label"], y=iw["snapp_inc_sat_avg"],
         name="Incentive Satisfaction",
         line=dict(color="#e74c3c", width=2.5), mode="lines+markers"
     ), secondary_y=True)
     if "snapp_commfree_pct" in iw.columns:
         fig_inc.add_trace(go.Scatter(
-            x=iw["yearweek"], y=iw["snapp_commfree_pct"],
+            x=iw["week_label"], y=iw["snapp_commfree_pct"],
             name="Comm-Free %",
             line=dict(color="#9b59b6", dash="dash", width=2)
         ), secondary_y=True)
@@ -370,7 +446,7 @@ def page3_incentive(views):
     ]:
         if col in iw.columns:
             fig_funnel.add_trace(go.Scatter(
-                x=iw["yearweek"], y=iw[col], name=name,
+                x=iw["week_label"], y=iw[col], name=name,
                 line=dict(color=color, width=2.5), mode="lines+markers"
             ))
     fig_funnel.update_layout(
@@ -421,8 +497,8 @@ def page3_incentive(views):
         marker_color=SNAPP_COLOR, opacity=0.7
     ))
     fig_ic.update_layout(
-        title="Average Snapp Incentive by City (Top 15)",
-        height=450, xaxis_title="Rials",
+        title="Average Snapp Incentive by City",
+        height=600, xaxis_title="Rials",
         margin=dict(l=120)
     )
     figs.append(fig_ic)
@@ -436,9 +512,9 @@ def page3_incentive(views):
 def page4_operations(views):
     figs = []
     nav = views["vw_NavigationUsage"]
-    nav_wk = views["vw_NavigationByWeek"]
+    nav_wk = add_persian_week_labels(views["vw_NavigationByWeek"])
     demo = views["vw_Demographics"]
-    rs = views["vw_RideShareByCityWeek"]
+    rs = add_persian_week_labels(views["vw_RideShareByCityWeek"])
 
     # --- Navigation App Usage ---
     for ctx_name in nav["context"].unique():
@@ -468,7 +544,7 @@ def page4_operations(views):
     for app in top_apps:
         sub = nav_top[nav_top["nav_app"] == app].sort_values("yearweek")
         fig_nav_wk.add_trace(go.Scatter(
-            x=sub["yearweek"], y=sub["pct"], name=app.strip(),
+            x=sub["week_label"], y=sub["pct"], name=app.strip(),
             mode="lines", line=dict(
                 color=app_colors.get(app.strip(), "#7f8c8d"), width=2.5
             )
@@ -483,9 +559,13 @@ def page4_operations(views):
 
     # --- Demographics Distributions ---
     for dim in ["cooperation_type", "age_group", "gender", "city"]:
-        sub = demo[demo["dimension"] == dim].sort_values("n", ascending=True)
+        sub = demo[demo["dimension"] == dim].copy()
         if dim == "city":
-            sub = sub.tail(15)  # top 15 cities
+            sub = sub[sub["category"].isin(CITY_ORDER)]
+            sub["category"] = pd.Categorical(sub["category"], categories=list(reversed(CITY_ORDER)), ordered=True)
+            sub = sub.sort_values("category")
+        else:
+            sub = sub.sort_values("n", ascending=True)
         fig_demo = go.Figure(go.Bar(
             y=sub["category"], x=sub["n"], orientation="h",
             marker_color="#3498db", opacity=0.8,
@@ -500,21 +580,23 @@ def page4_operations(views):
         figs.append(fig_demo)
 
     # --- Ride Share: Aggregate weekly ---
-    rs_wk = rs.groupby("yearweek").agg(
+    label_cats = rs["week_label"].cat.categories.tolist()
+    rs_wk = rs.groupby(["yearweek", "week_label"], observed=True).agg(
         snapp_rides=("snapp_rides_total", "sum"),
         tapsi_rides=("joint_tapsi_rides", "sum"),
         total=("total_rides", "sum")
     ).reset_index().sort_values("yearweek")
+    rs_wk["week_label"] = pd.Categorical(rs_wk["week_label"], categories=label_cats, ordered=True)
     rs_wk["snapp_pct"] = rs_wk["snapp_rides"] / rs_wk["total"] * 100
     rs_wk["tapsi_pct"] = rs_wk["tapsi_rides"] / rs_wk["total"] * 100
 
     fig_rs = go.Figure()
     fig_rs.add_trace(go.Scatter(
-        x=rs_wk["yearweek"], y=rs_wk["snapp_pct"], name="Snapp %",
+        x=rs_wk["week_label"], y=rs_wk["snapp_pct"], name="Snapp %",
         fill="tozeroy", line=dict(color=SNAPP_COLOR)
     ))
     fig_rs.add_trace(go.Scatter(
-        x=rs_wk["yearweek"], y=rs_wk["tapsi_pct"], name="Tapsi %",
+        x=rs_wk["week_label"], y=rs_wk["tapsi_pct"], name="Tapsi %",
         fill="tozeroy", line=dict(color=TAPSI_COLOR)
     ))
     fig_rs.update_layout(
