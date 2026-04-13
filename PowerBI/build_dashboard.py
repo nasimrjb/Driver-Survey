@@ -65,8 +65,8 @@ def yearweek_to_persian(yw):
         m1 = PERSIAN_MONTHS[j_sat.month - 1]
         m2 = PERSIAN_MONTHS[j_fri.month - 1]
         if m1 == m2:
-            return f"W{wk}: {j_sat.day}-{j_fri.day} {m1}"
-        return f"W{wk}: {j_sat.day} {m1}-{j_fri.day} {m2}"
+            return f"{yy}-W{wk}: {j_sat.day}-{j_fri.day} {m1}"
+        return f"{yy}-W{wk}: {j_sat.day} {m1}-{j_fri.day} {m2}"
     except Exception:
         return yw
 
@@ -179,11 +179,13 @@ def page1_executive(views):
         opacity=0.6
     ), secondary_y=True)
 
+    ws_labels = ws["week_label"].tolist()
     fig_sat.update_layout(
         title="Weekly Satisfaction Trends (1-5 scale)",
         height=400, hovermode="x unified",
         legend=dict(orientation="h", y=-0.15),
-        margin=dict(t=40, b=60)
+        margin=dict(t=40, b=60),
+        xaxis=dict(categoryorder="array", categoryarray=ws_labels),
     )
     fig_sat.update_yaxes(title_text="Satisfaction (1-5)", range=[1, 5], secondary_y=False)
     fig_sat.update_yaxes(title_text="Joint %", secondary_y=True)
@@ -209,11 +211,13 @@ def page1_executive(views):
             connectgaps=True
         ))
     fig_nps.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+    nps_labels = nps.sort_values("yearweek")["week_label"].tolist()
     fig_nps.update_layout(
         title=f"Weekly NPS Score (Snapp: {len(nps_valid)} weeks, Tapsi: {len(nps_tapsi)} weeks — rare question)",
         height=350, hovermode="x unified",
         yaxis_title="NPS",
-        legend=dict(orientation="h", y=-0.15)
+        legend=dict(orientation="h", y=-0.15),
+        xaxis=dict(categoryorder="array", categoryarray=nps_labels),
     )
     figs.append(fig_nps)
 
@@ -235,7 +239,8 @@ def page1_executive(views):
     fig_nps_decomp.update_layout(
         title="Snapp NPS Decomposition (Detractors / Passives / Promoters %)",
         height=350, yaxis_title="%", hovermode="x unified",
-        legend=dict(orientation="h", y=-0.15)
+        legend=dict(orientation="h", y=-0.15),
+        xaxis=dict(categoryorder="array", categoryarray=nps_labels),
     )
     figs.append(fig_nps_decomp)
 
@@ -247,6 +252,7 @@ def page1_executive(views):
     fig_resp.update_layout(
         title="Weekly Response Count",
         height=250, yaxis_title="Responses",
+        xaxis=dict(categoryorder="array", categoryarray=ws_labels),
         margin=dict(t=40, b=30)
     )
     figs.append(fig_resp)
@@ -467,10 +473,12 @@ def page3_incentive(views):
             line=dict(color="#9b59b6", dash="dash", width=2),
             hovertemplate="Comm-Free: %{y:.1f}%<extra></extra>",
         ), secondary_y=True)
+    iw_labels = iw["week_label"].tolist()
     fig_inc.update_layout(
         title="Incentive ROI: Spend vs Satisfaction",
         height=420, hovermode="x unified", plot_bgcolor="white",
         legend=dict(orientation="h", y=-0.18),
+        xaxis=dict(categoryorder="array", categoryarray=iw_labels),
     )
     fig_inc.update_yaxes(title_text="Incentive (M Rials)", gridcolor="#e8e8e8",
                          secondary_y=False)
@@ -501,6 +509,7 @@ def page3_incentive(views):
         title="Incentive Funnel: Message → Participation (gap = drop-off)",
         height=350, yaxis_title="%", hovermode="x unified",
         plot_bgcolor="white", yaxis=dict(gridcolor="#e8e8e8"),
+        xaxis=dict(categoryorder="array", categoryarray=iw_labels),
         legend=dict(orientation="h", y=-0.2),
     )
     figs.append(fig_funnel)
@@ -661,6 +670,8 @@ def page4_operations(views):
         height=420, yaxis_title="% of Drivers",
         hovermode="x unified", plot_bgcolor="white",
         yaxis=dict(gridcolor="#e8e8e8"),
+        xaxis=dict(categoryorder="array",
+                   categoryarray=nav_wk.sort_values("yearweek")["week_label"].unique().tolist()),
         legend=dict(orientation="h", y=-0.15),
     )
     figs.append(fig_nav_wk)
@@ -678,18 +689,22 @@ def page4_operations(views):
         if dim == "gender":
             gender_colors = {"Male": "#2196F3", "Female": "#E91E63",
                              "مرد": "#2196F3", "زن": "#E91E63"}
-            sub = sub.sort_values("n", ascending=False)
-            pie_colors = [gender_colors.get(c.strip(), "#95a5a6") for c in sub["category"]]
-            fig_demo = go.Figure(go.Pie(
-                labels=sub["category"], values=sub["n"],
-                marker=dict(colors=pie_colors),
-                hole=0.5, textinfo="label+percent",
-                textposition="inside", textfont=dict(size=13),
-                hovertemplate="%{label}: %{value:,} (%{percent})<extra></extra>",
+            total = sub["n"].sum()
+            sub = sub.sort_values("n", ascending=True)
+            bar_colors = [gender_colors.get(c.strip(), "#95a5a6") for c in sub["category"]]
+            fig_demo = go.Figure(go.Bar(
+                y=sub["category"], x=sub["n"], orientation="h",
+                marker_color=bar_colors,
+                text=[f"{int(n):,}  ({n/total*100:.1f}%)" for n in sub["n"]],
+                textposition="inside", textfont=dict(size=15, color="white"),
+                insidetextanchor="middle",
+                hovertemplate="%{y}: %{x:,}<extra></extra>",
             ))
             fig_demo.update_layout(
                 title="Distribution: Gender",
-                height=350, showlegend=False,
+                height=200, margin=dict(l=100, r=40),
+                plot_bgcolor="white", xaxis=dict(gridcolor="#e8e8e8"),
+                xaxis_title="Count",
             )
             figs.append(fig_demo)
             continue
@@ -740,22 +755,26 @@ def page4_operations(views):
     rs_wk["tapsi_pct"] = rs_wk["tapsi_rides"] / rs_wk["total"] * 100
 
     fig_rs = go.Figure()
-    fig_rs.add_trace(go.Bar(
+    ordered_labels = rs_wk.sort_values("yearweek")["week_label"].tolist()
+    fig_rs.add_trace(go.Scatter(
         x=rs_wk["week_label"], y=rs_wk["snapp_pct"], name="Snapp %",
-        marker_color=SNAPP_COLOR, marker_line=dict(width=0),
+        mode="lines+markers", line=dict(color=SNAPP_COLOR, width=2.5),
+        marker=dict(size=5, line=dict(width=1, color="white")),
         hovertemplate="Snapp: %{y:.1f}%<extra></extra>",
     ))
-    fig_rs.add_trace(go.Bar(
+    fig_rs.add_trace(go.Scatter(
         x=rs_wk["week_label"], y=rs_wk["tapsi_pct"], name="Tapsi %",
-        marker_color=TAPSI_COLOR, marker_line=dict(width=0),
+        mode="lines+markers", line=dict(color=TAPSI_COLOR, width=2.5),
+        marker=dict(size=5, line=dict(width=1, color="white")),
         hovertemplate="Tapsi: %{y:.1f}%<extra></extra>",
     ))
     fig_rs.update_layout(
         title="Ride Share: Snapp vs Tapsi Over Time",
-        barmode="stack", height=380,
-        yaxis_title="% of Total Rides", yaxis_range=[0, 100],
+        height=380,
+        yaxis_title="% of Total Rides",
         hovermode="x unified", plot_bgcolor="white",
         yaxis=dict(gridcolor="#e8e8e8"),
+        xaxis=dict(categoryorder="array", categoryarray=ordered_labels),
         legend=dict(orientation="h", y=-0.15),
     )
     figs.append(fig_rs)
@@ -811,6 +830,50 @@ def page5_survey(views):
 
 
 # ============================================================
+# PAGE 6: RIDE SHARE BY CITY
+# ============================================================
+def page6_rideshare_city(views):
+    figs = []
+    rs = add_persian_week_labels(views["vw_RideShareByCityWeek"])
+    ordered_labels = rs.sort_values("yearweek")["week_label"].unique().tolist()
+
+    for city in CITY_ORDER:
+        city_data = rs[rs["city"] == city].sort_values("yearweek").copy()
+        if len(city_data) == 0:
+            continue
+        city_data["snapp_pct"] = city_data["snapp_rides_total"] / city_data["total_rides"] * 100
+        city_data["tapsi_pct"] = city_data["joint_tapsi_rides"] / city_data["total_rides"] * 100
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=city_data["week_label"], y=city_data["snapp_pct"], name="Snapp %",
+            mode="lines+markers", line=dict(color=SNAPP_COLOR, width=2),
+            marker=dict(size=5, line=dict(width=1, color="white")),
+            hovertemplate="Snapp: %{y:.1f}%<extra></extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=city_data["week_label"], y=city_data["tapsi_pct"], name="Tapsi %",
+            mode="lines+markers", line=dict(color=TAPSI_COLOR, width=2),
+            marker=dict(size=5, line=dict(width=1, color="white")),
+            hovertemplate="Tapsi: %{y:.1f}%<extra></extra>",
+        ))
+        n_total = int(city_data["total_rides"].sum())
+        fig.update_layout(
+            title=f"{city} — Ride Share (n={n_total:,} total rides)",
+            height=320,
+            yaxis_title="% of Rides",
+            hovermode="x unified", plot_bgcolor="white",
+            yaxis=dict(gridcolor="#e8e8e8"),
+            xaxis=dict(categoryorder="array", categoryarray=ordered_labels),
+            legend=dict(orientation="h", y=-0.2),
+            margin=dict(t=40, b=60),
+        )
+        figs.append(fig)
+
+    return figs
+
+
+# ============================================================
 # ASSEMBLE HTML
 # ============================================================
 def build_html(all_pages):
@@ -821,7 +884,8 @@ def build_html(all_pages):
         "Satisfaction Deep-Dive",
         "Incentive Analysis",
         "Operations & Demographics",
-        "Survey Explorer"
+        "Survey Explorer",
+        "Ride Share by City",
     ]
 
     # Convert each figure to HTML div
@@ -966,8 +1030,13 @@ def main():
     p5 = page5_survey(views)
     print(f"  {len(p5)} charts")
 
-    print(f"\nAssembling HTML ({len(p1)+len(p2)+len(p3)+len(p4)+len(p5)} total charts)...")
-    html = build_html([p1, p2, p3, p4, p5])
+    print("Building Page 6: Ride Share by City...")
+    p6 = page6_rideshare_city(views)
+    print(f"  {len(p6)} charts")
+
+    total = len(p1)+len(p2)+len(p3)+len(p4)+len(p5)+len(p6)
+    print(f"\nAssembling HTML ({total} total charts)...")
+    html = build_html([p1, p2, p3, p4, p5, p6])
 
     os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
     with open(OUTPUT, "w", encoding="utf-8") as f:

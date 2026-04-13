@@ -256,9 +256,13 @@ def prepare_dataframe(df, col_types):
             # strftime turns NaT into 'NaT' string — fix that
             df_ready[col_name] = df_ready[col_name].replace("NaT", "")
 
-    # Replace empty strings with NaN, then NaN with None (SQL NULL)
-    df_ready = df_ready.replace("", np.nan)
+    # Replace empty strings with None (SQL NULL)
+    # Note: df.where() can leave float NaN in mixed-type columns,
+    # so we convert via applymap to ensure proper None values.
+    df_ready = df_ready.replace("", None)
     df_ready = df_ready.where(df_ready.notna(), None)
+    # Belt-and-suspenders: ensure no numpy NaN survives
+    df_ready = df_ready.map(lambda x: None if x is np.nan or (isinstance(x, float) and np.isnan(x)) else x)
     return df_ready
 
 
