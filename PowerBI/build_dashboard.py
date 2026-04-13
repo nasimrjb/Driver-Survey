@@ -267,51 +267,75 @@ def page2_satisfaction(views):
     hm = views["vw_HoneymoonEffect"]
     scw = add_persian_week_labels(views["vw_SatisfactionByCityWeek"])
 
-    # --- Top Cities Satisfaction ---
+    # --- Top Cities Satisfaction (dot plot) ---
     fig_city = go.Figure()
-    for col, name, color in [
-        ("snapp_fare_sat", "Snapp Fare", SNAPP_COLOR),
-        ("snapp_income_sat", "Snapp Income", "#2ecc71"),
-        ("snapp_req_sat", "Snapp Request", "#1abc9c"),
-        ("tapsi_fare_sat", "Tapsi Fare", TAPSI_COLOR),
-    ]:
+    dot_metrics = [
+        ("snapp_fare_sat", "Snapp Fare", SNAPP_COLOR, "circle"),
+        ("snapp_income_sat", "Snapp Income", "#2196F3", "diamond"),
+        ("snapp_req_sat", "Snapp Request", "#9C27B0", "square"),
+        ("tapsi_fare_sat", "Tapsi Fare", TAPSI_COLOR, "triangle-up"),
+    ]
+    for col, name, color, symbol in dot_metrics:
         if col in sc.columns:
-            fig_city.add_trace(go.Bar(
+            fig_city.add_trace(go.Scatter(
                 y=sc["city"], x=sc[col], name=name,
-                orientation="h", marker_color=color, opacity=0.85
+                mode="markers",
+                marker=dict(color=color, size=12, symbol=symbol,
+                            line=dict(width=1, color="white")),
+                hovertemplate=f"{name}: %{{x:.2f}}<extra>%{{y}}</extra>"
             ))
     fig_city.update_layout(
         title="Satisfaction by City",
-        barmode="group", height=600,
-        xaxis_title="Satisfaction (1-5)", xaxis_range=[1, 5],
-        legend=dict(orientation="h", y=-0.12),
-        margin=dict(l=120)
+        height=700, xaxis_title="Satisfaction (1-5)", xaxis_range=[1, 5],
+        legend=dict(orientation="h", y=-0.08),
+        margin=dict(l=120),
+        yaxis=dict(dtick=1),
+        xaxis=dict(gridcolor="#e0e0e0", gridwidth=1),
+        plot_bgcolor="white",
     )
     figs.append(fig_city)
 
-    # --- Satisfaction by Demographics ---
+    # --- Satisfaction by Demographics (dumbbell / dot plot) ---
+    demo_metrics = [
+        ("snapp_fare_sat", "Snapp Fare", SNAPP_COLOR, "circle"),
+        ("snapp_income_sat", "Snapp Income", "#2196F3", "diamond"),
+        ("tapsi_fare_sat", "Tapsi Fare", TAPSI_COLOR, "triangle-up"),
+    ]
     for dim_name in ["cooperation_type", "driver_type", "age_group", "gender"]:
         sub = sd[sd["dimension"] == dim_name].copy()
         if len(sub) == 0:
             continue
+        # Draw connecting lines between min/max per category (dumbbell)
         fig_dim = go.Figure()
-        for col, name, color in [
-            ("snapp_fare_sat", "Snapp Fare", SNAPP_COLOR),
-            ("snapp_income_sat", "Snapp Income", "#2ecc71"),
-            ("tapsi_fare_sat", "Tapsi Fare", TAPSI_COLOR),
-        ]:
+        metric_cols = [c for c, _, _, _ in demo_metrics if c in sub.columns]
+        for _, row in sub.iterrows():
+            vals = [row[c] for c in metric_cols if pd.notna(row[c])]
+            if len(vals) >= 2:
+                fig_dim.add_trace(go.Scatter(
+                    x=[min(vals), max(vals)], y=[row["category"]] * 2,
+                    mode="lines", line=dict(color="#ddd", width=6),
+                    showlegend=False, hoverinfo="skip"
+                ))
+        for col, name, color, symbol in demo_metrics:
             if col in sub.columns:
-                fig_dim.add_trace(go.Bar(
-                    x=sub["category"], y=sub[col], name=name,
-                    marker_color=color, opacity=0.85,
-                    text=[f"n={int(n)}" for n in sub["n"]],
-                    textposition="outside"
+                fig_dim.add_trace(go.Scatter(
+                    x=sub[col], y=sub["category"], name=name,
+                    mode="markers+text",
+                    marker=dict(color=color, size=14, symbol=symbol,
+                                line=dict(width=1, color="white")),
+                    text=[f"{v:.2f}" for v in sub[col]],
+                    textposition="top center", textfont=dict(size=10),
+                    hovertemplate=f"{name}: %{{x:.2f}} (n=%{{customdata:,}})<extra>%{{y}}</extra>",
+                    customdata=sub["n"],
                 ))
         fig_dim.update_layout(
             title=f"Satisfaction by {dim_name.replace('_', ' ').title()}",
-            barmode="group", height=350,
-            yaxis_title="Satisfaction (1-5)", yaxis_range=[1, 5],
-            legend=dict(orientation="h", y=-0.15)
+            height=max(280, len(sub) * 70 + 120),
+            xaxis_title="Satisfaction (1-5)", xaxis_range=[1, 4],
+            xaxis=dict(gridcolor="#e0e0e0", gridwidth=1),
+            legend=dict(orientation="h", y=-0.2),
+            margin=dict(l=120),
+            plot_bgcolor="white",
         )
         figs.append(fig_dim)
 
@@ -346,28 +370,38 @@ def page2_satisfaction(views):
     hm_sorted = hm_sorted.sort_values("sort_key")
     hm_sorted["tenure_label"] = hm_sorted["tenure"].str.strip().map(tenure_labels).fillna(hm_sorted["tenure"])
 
-    fig_hon = go.Figure()
-    for col, name, color in [
-        ("snapp_fare_sat", "Fare Sat", SNAPP_COLOR),
-        ("snapp_income_sat", "Income Sat", "#2ecc71"),
-        ("snapp_overall_sat", "Overall Sat", "#3498db"),
+    # Add sample size as a subtle bar in the background
+    fig_hon = make_subplots(specs=[[{"secondary_y": True}]])
+    fig_hon.add_trace(go.Bar(
+        x=hm_sorted["tenure_label"], y=hm_sorted["n"], name="Sample Size",
+        marker_color="#e8e8e8", showlegend=True,
+        hovertemplate="n=%{y:,}<extra></extra>",
+    ), secondary_y=True)
+    for col, name, color, dash in [
+        ("snapp_fare_sat", "Fare Sat", SNAPP_COLOR, "solid"),
+        ("snapp_income_sat", "Income Sat", "#2196F3", "dash"),
+        ("snapp_overall_sat", "Overall Sat", "#9C27B0", "dot"),
     ]:
         if col in hm_sorted.columns:
             series = hm_sorted[col]
-            # Skip traces with >50% null values
             if series.notna().sum() < len(series) * 0.5:
                 continue
             fig_hon.add_trace(go.Scatter(
                 x=hm_sorted["tenure_label"], y=hm_sorted[col], name=name,
-                mode="lines+markers", line=dict(color=color, width=2.5),
-                marker=dict(size=8), connectgaps=True
-            ))
+                mode="lines+markers", line=dict(color=color, width=2.5, dash=dash),
+                marker=dict(size=8, line=dict(width=1, color="white")),
+                connectgaps=True,
+                hovertemplate=f"{name}: %{{y:.2f}}<extra></extra>",
+            ), secondary_y=False)
     fig_hon.update_layout(
         title="Honeymoon Effect: Satisfaction by Snapp Tenure",
-        height=400, yaxis_title="Satisfaction (1-5)", yaxis_range=[1, 5],
-        xaxis_title="Tenure", legend=dict(orientation="h", y=-0.2),
-        xaxis_tickangle=-30
+        height=420, legend=dict(orientation="h", y=-0.22),
+        xaxis_tickangle=-30, plot_bgcolor="white",
+        xaxis=dict(title="Tenure"),
     )
+    fig_hon.update_yaxes(title_text="Satisfaction (1-5)", range=[1, 5],
+                         gridcolor="#e0e0e0", secondary_y=False)
+    fig_hon.update_yaxes(title_text="Sample Size", showgrid=False, secondary_y=True)
     figs.append(fig_hon)
 
     # --- City x Week Heatmap ---
@@ -415,91 +449,144 @@ def page3_incentive(views):
     fig_inc = make_subplots(specs=[[{"secondary_y": True}]])
     fig_inc.add_trace(go.Bar(
         x=iw["week_label"], y=iw["snapp_incentive_avg_mrial"],
-        name="Snapp Incentive (M Rials)",
-        marker_color=SNAPP_COLOR, opacity=0.5
+        name="Avg Incentive (M Rials)",
+        marker_color="rgba(0,200,83,0.35)", marker_line=dict(color=SNAPP_COLOR, width=1),
+        hovertemplate="Incentive: %{y:.2f} M Rials<extra></extra>",
     ), secondary_y=False)
     fig_inc.add_trace(go.Scatter(
         x=iw["week_label"], y=iw["snapp_inc_sat_avg"],
         name="Incentive Satisfaction",
-        line=dict(color="#e74c3c", width=2.5), mode="lines+markers"
+        line=dict(color="#e74c3c", width=3), mode="lines+markers",
+        marker=dict(size=7, line=dict(width=1, color="white")),
+        hovertemplate="Satisfaction: %{y:.2f}<extra></extra>",
     ), secondary_y=True)
     if "snapp_commfree_pct" in iw.columns:
         fig_inc.add_trace(go.Scatter(
             x=iw["week_label"], y=iw["snapp_commfree_pct"],
             name="Comm-Free %",
-            line=dict(color="#9b59b6", dash="dash", width=2)
+            line=dict(color="#9b59b6", dash="dash", width=2),
+            hovertemplate="Comm-Free: %{y:.1f}%<extra></extra>",
         ), secondary_y=True)
     fig_inc.update_layout(
         title="Incentive ROI: Spend vs Satisfaction",
-        height=400, hovermode="x unified",
-        legend=dict(orientation="h", y=-0.15)
+        height=420, hovermode="x unified", plot_bgcolor="white",
+        legend=dict(orientation="h", y=-0.18),
     )
-    fig_inc.update_yaxes(title_text="Incentive (M Rials)", secondary_y=False)
-    fig_inc.update_yaxes(title_text="Satisfaction / %", secondary_y=True)
+    fig_inc.update_yaxes(title_text="Incentive (M Rials)", gridcolor="#e8e8e8",
+                         secondary_y=False)
+    fig_inc.update_yaxes(title_text="Satisfaction / %", showgrid=False,
+                         secondary_y=True)
     figs.append(fig_inc)
 
-    # --- Incentive Funnel ---
-    fig_funnel = make_subplots(specs=[[{"secondary_y": False}]])
-    for col, name, color in [
-        ("snapp_gotmsg_pct", "Got Message %", "#3498db"),
-        ("snapp_participation_pct", "Participated %", "#2ecc71"),
-    ]:
-        if col in iw.columns:
-            fig_funnel.add_trace(go.Scatter(
-                x=iw["week_label"], y=iw[col], name=name,
-                line=dict(color=color, width=2.5), mode="lines+markers"
-            ))
+    # --- Incentive Funnel (area fill to show conversion gap) ---
+    fig_funnel = go.Figure()
+    if "snapp_gotmsg_pct" in iw.columns:
+        fig_funnel.add_trace(go.Scatter(
+            x=iw["week_label"], y=iw["snapp_gotmsg_pct"], name="Got Message %",
+            line=dict(color="#2196F3", width=2.5), mode="lines+markers",
+            marker=dict(size=6), fill="tozeroy",
+            fillcolor="rgba(33,150,243,0.15)",
+            hovertemplate="Got Message: %{y:.1f}%<extra></extra>",
+        ))
+    if "snapp_participation_pct" in iw.columns:
+        fig_funnel.add_trace(go.Scatter(
+            x=iw["week_label"], y=iw["snapp_participation_pct"],
+            name="Participated %",
+            line=dict(color=SNAPP_COLOR, width=2.5), mode="lines+markers",
+            marker=dict(size=6), fill="tozeroy",
+            fillcolor="rgba(0,200,83,0.15)",
+            hovertemplate="Participated: %{y:.1f}%<extra></extra>",
+        ))
     fig_funnel.update_layout(
-        title="Incentive Funnel: Message -> Participation",
-        height=300, yaxis_title="%", hovermode="x unified",
-        legend=dict(orientation="h", y=-0.2)
+        title="Incentive Funnel: Message → Participation (gap = drop-off)",
+        height=350, yaxis_title="%", hovermode="x unified",
+        plot_bgcolor="white", yaxis=dict(gridcolor="#e8e8e8"),
+        legend=dict(orientation="h", y=-0.2),
     )
     figs.append(fig_funnel)
 
-    # --- Incentive Types ---
+    # --- Incentive Types (lollipop chart) ---
     if len(it) > 0:
         it_sorted = it.sort_values("n", ascending=True)
-        fig_types = go.Figure(go.Bar(
-            y=it_sorted["reason"], x=it_sorted["n"],
-            orientation="h", marker_color=SNAPP_COLOR,
+        fig_types = go.Figure()
+        # Stems
+        for _, row in it_sorted.iterrows():
+            fig_types.add_trace(go.Scatter(
+                x=[0, row["n"]], y=[row["reason"]] * 2,
+                mode="lines", line=dict(color="#c8e6c9", width=3),
+                showlegend=False, hoverinfo="skip",
+            ))
+        # Dots
+        fig_types.add_trace(go.Scatter(
+            x=it_sorted["n"], y=it_sorted["reason"],
+            mode="markers+text", name="Count",
+            marker=dict(color=SNAPP_COLOR, size=14,
+                        line=dict(width=1.5, color="white")),
             text=[f"{int(n):,}" for n in it_sorted["n"]],
-            textposition="outside"
+            textposition="middle right", textfont=dict(size=11),
+            hovertemplate="%{y}: %{x:,}<extra></extra>",
         ))
         fig_types.update_layout(
             title="Snapp Incentive Types Received",
-            height=300, xaxis_title="Count",
-            margin=dict(l=200)
+            height=max(300, len(it_sorted) * 35 + 100),
+            xaxis_title="Count", margin=dict(l=200),
+            plot_bgcolor="white", showlegend=False,
+            xaxis=dict(gridcolor="#e8e8e8"),
         )
         figs.append(fig_types)
 
-    # --- Unsatisfaction Reasons ---
+    # --- Unsatisfaction Reasons (butterfly / back-to-back) ---
     if len(ur) > 0:
+        snapp_ur = ur[ur["platform"] == "Snapp"].set_index("reason")
+        tapsi_ur = ur[ur["platform"] == "Tapsi"].set_index("reason")
+        all_reasons = ur["reason"].unique().tolist()
         fig_unsat = go.Figure()
-        for platform, color in [("Snapp", SNAPP_COLOR), ("Tapsi", TAPSI_COLOR)]:
-            sub = ur[ur["platform"] == platform].sort_values("n", ascending=True)
-            fig_unsat.add_trace(go.Bar(
-                y=sub["reason"], x=sub["n"], name=platform,
-                orientation="h", marker_color=color, opacity=0.85
-            ))
+        # Snapp on the right (positive)
+        snapp_vals = [int(snapp_ur.loc[r, "n"]) if r in snapp_ur.index else 0
+                      for r in all_reasons]
+        tapsi_vals = [-int(tapsi_ur.loc[r, "n"]) if r in tapsi_ur.index else 0
+                      for r in all_reasons]
+        fig_unsat.add_trace(go.Bar(
+            y=all_reasons, x=snapp_vals, name="Snapp",
+            orientation="h", marker_color=SNAPP_COLOR,
+            text=[f"{v:,}" for v in snapp_vals],
+            textposition="outside",
+            hovertemplate="Snapp — %{y}: %{x:,}<extra></extra>",
+        ))
+        fig_unsat.add_trace(go.Bar(
+            y=all_reasons, x=tapsi_vals, name="Tapsi",
+            orientation="h", marker_color=TAPSI_COLOR,
+            text=[f"{abs(v):,}" for v in tapsi_vals],
+            textposition="outside",
+            hovertemplate="Tapsi — %{y}: %{customdata:,}<extra></extra>",
+            customdata=[abs(v) for v in tapsi_vals],
+        ))
         fig_unsat.update_layout(
-            title="Incentive Unsatisfaction Reasons",
-            barmode="group", height=350,
-            xaxis_title="Count", margin=dict(l=150),
-            legend=dict(orientation="h", y=-0.15)
+            title="Incentive Unsatisfaction Reasons (Snapp → | ← Tapsi)",
+            barmode="overlay", height=max(350, len(all_reasons) * 40 + 100),
+            xaxis_title="Count", margin=dict(l=180),
+            plot_bgcolor="white",
+            xaxis=dict(gridcolor="#e8e8e8"),
+            legend=dict(orientation="h", y=-0.15),
         )
         figs.append(fig_unsat)
 
-    # --- Incentive by City ---
+    # --- Incentive by City (dot plot with satisfaction) ---
     fig_ic = go.Figure()
-    fig_ic.add_trace(go.Bar(
+    # Incentive amount as dots
+    fig_ic.add_trace(go.Scatter(
         y=ic["city"], x=ic["snapp_incentive_avg"],
-        name="Avg Incentive (Rials)", orientation="h",
-        marker_color=SNAPP_COLOR, opacity=0.7
+        mode="markers", name="Avg Incentive (Rials)",
+        marker=dict(color=SNAPP_COLOR, size=13, symbol="circle",
+                    line=dict(width=1, color="white")),
+        hovertemplate="Incentive: %{x:,.0f} Rials<extra>%{y}</extra>",
     ))
     fig_ic.update_layout(
         title="Average Snapp Incentive by City",
-        height=600, xaxis_title="Rials",
-        margin=dict(l=120)
+        height=650, xaxis_title="Rials",
+        margin=dict(l=120), plot_bgcolor="white",
+        xaxis=dict(gridcolor="#e0e0e0"),
+        yaxis=dict(dtick=1),
     )
     figs.append(fig_ic)
 
@@ -516,70 +603,132 @@ def page4_operations(views):
     demo = views["vw_Demographics"]
     rs = add_persian_week_labels(views["vw_RideShareByCityWeek"])
 
-    # --- Navigation App Usage ---
-    for ctx_name in nav["context"].unique():
-        sub = nav[nav["context"] == ctx_name].sort_values("n", ascending=True)
-        colors = {"Google Map": "#4285F4", "Waze": "#33CCFF", "Neshan": "#FF5722",
+    # --- Navigation App Usage (side-by-side donut charts per context) ---
+    app_colors = {"Google Map": "#4285F4", "Waze": "#33CCFF", "Neshan": "#FF5722",
                   "Balad": "#9C27B0", "No Navigation App": "#95a5a6"}
-        bar_colors = [colors.get(a.strip(), "#7f8c8d") for a in sub["nav_app"]]
-        fig_nav = go.Figure(go.Bar(
-            y=sub["nav_app"], x=sub["n"], orientation="h",
-            marker_color=bar_colors,
-            text=[f"{int(n):,}" for n in sub["n"]],
-            textposition="outside"
-        ))
+    contexts = list(nav["context"].unique())
+    if len(contexts) >= 2:
+        fig_nav = make_subplots(
+            rows=1, cols=len(contexts),
+            specs=[[{"type": "pie"}] * len(contexts)],
+            subplot_titles=contexts,
+        )
+        for i, ctx_name in enumerate(contexts):
+            sub = nav[nav["context"] == ctx_name].sort_values("n", ascending=False)
+            pie_colors = [app_colors.get(a.strip(), "#7f8c8d") for a in sub["nav_app"]]
+            fig_nav.add_trace(go.Pie(
+                labels=sub["nav_app"], values=sub["n"],
+                marker=dict(colors=pie_colors),
+                hole=0.45, textinfo="label+percent",
+                textposition="outside", textfont=dict(size=11),
+                hovertemplate="%{label}: %{value:,} (%{percent})<extra></extra>",
+            ), row=1, col=i + 1)
         fig_nav.update_layout(
-            title=f"Navigation App Usage ({ctx_name})",
-            height=300, xaxis_title="Count",
-            margin=dict(l=150)
+            title="Navigation App Usage by Context",
+            height=400, showlegend=False,
         )
         figs.append(fig_nav)
+    else:
+        for ctx_name in contexts:
+            sub = nav[nav["context"] == ctx_name].sort_values("n", ascending=False)
+            pie_colors = [app_colors.get(a.strip(), "#7f8c8d") for a in sub["nav_app"]]
+            fig_nav = go.Figure(go.Pie(
+                labels=sub["nav_app"], values=sub["n"],
+                marker=dict(colors=pie_colors),
+                hole=0.45, textinfo="label+percent",
+                textposition="outside",
+            ))
+            fig_nav.update_layout(
+                title=f"Navigation App Usage ({ctx_name})", height=400,
+            )
+            figs.append(fig_nav)
 
-    # --- Navigation by Week ---
+    # --- Navigation by Week (stacked area — market share view) ---
     top_apps = nav_wk.groupby("nav_app")["n"].sum().nlargest(5).index
     nav_top = nav_wk[nav_wk["nav_app"].isin(top_apps)]
     fig_nav_wk = go.Figure()
-    app_colors = {"Google Map": "#4285F4", "Waze": "#33CCFF", "Neshan": "#FF5722",
-                  "Balad": "#9C27B0", "No Navigation App": "#95a5a6"}
     for app in top_apps:
         sub = nav_top[nav_top["nav_app"] == app].sort_values("yearweek")
         fig_nav_wk.add_trace(go.Scatter(
             x=sub["week_label"], y=sub["pct"], name=app.strip(),
-            mode="lines", line=dict(
-                color=app_colors.get(app.strip(), "#7f8c8d"), width=2.5
-            )
+            mode="lines", stackgroup="one",
+            line=dict(width=0.5, color=app_colors.get(app.strip(), "#7f8c8d")),
+            fillcolor=app_colors.get(app.strip(), "#7f8c8d"),
+            hovertemplate=f"{app.strip()}: %{{y:.1f}}%<extra></extra>",
         ))
     fig_nav_wk.update_layout(
-        title="Navigation App Adoption Over Time",
-        height=400, yaxis_title="% of Drivers",
-        hovermode="x unified",
-        legend=dict(orientation="h", y=-0.15)
+        title="Navigation App Market Share Over Time",
+        height=420, yaxis_title="% of Drivers",
+        hovermode="x unified", plot_bgcolor="white",
+        yaxis=dict(gridcolor="#e8e8e8"),
+        legend=dict(orientation="h", y=-0.15),
     )
     figs.append(fig_nav_wk)
 
     # --- Demographics Distributions ---
+    demo_colors = {
+        "cooperation_type": "#3498db",
+        "age_group": "#2196F3",
+        "city": "#3498db",
+    }
     for dim in ["cooperation_type", "age_group", "gender", "city"]:
         sub = demo[demo["dimension"] == dim].copy()
+
+        # Gender → donut chart
+        if dim == "gender":
+            gender_colors = {"Male": "#2196F3", "Female": "#E91E63",
+                             "مرد": "#2196F3", "زن": "#E91E63"}
+            sub = sub.sort_values("n", ascending=False)
+            pie_colors = [gender_colors.get(c.strip(), "#95a5a6") for c in sub["category"]]
+            fig_demo = go.Figure(go.Pie(
+                labels=sub["category"], values=sub["n"],
+                marker=dict(colors=pie_colors),
+                hole=0.5, textinfo="label+percent",
+                textposition="inside", textfont=dict(size=13),
+                hovertemplate="%{label}: %{value:,} (%{percent})<extra></extra>",
+            ))
+            fig_demo.update_layout(
+                title="Distribution: Gender",
+                height=350, showlegend=False,
+            )
+            figs.append(fig_demo)
+            continue
+
         if dim == "city":
             sub = sub[sub["category"].isin(CITY_ORDER)]
-            sub["category"] = pd.Categorical(sub["category"], categories=list(reversed(CITY_ORDER)), ordered=True)
+            sub["category"] = pd.Categorical(
+                sub["category"], categories=list(reversed(CITY_ORDER)), ordered=True)
             sub = sub.sort_values("category")
         else:
             sub = sub.sort_values("n", ascending=True)
-        fig_demo = go.Figure(go.Bar(
-            y=sub["category"], x=sub["n"], orientation="h",
-            marker_color="#3498db", opacity=0.8,
-            text=[f"{int(n):,}" for n in sub["n"]],
-            textposition="outside"
+
+        total = sub["n"].sum()
+        fig_demo = go.Figure()
+        # Lollipop style
+        for _, row in sub.iterrows():
+            fig_demo.add_trace(go.Scatter(
+                x=[0, row["n"]], y=[row["category"]] * 2,
+                mode="lines", line=dict(color="#e0e0e0", width=4),
+                showlegend=False, hoverinfo="skip",
+            ))
+        fig_demo.add_trace(go.Scatter(
+            y=sub["category"], x=sub["n"],
+            mode="markers+text", showlegend=False,
+            marker=dict(color=demo_colors.get(dim, "#3498db"), size=12,
+                        line=dict(width=1, color="white")),
+            text=[f"{int(n):,} ({n/total*100:.1f}%)" for n in sub["n"]],
+            textposition="middle right", textfont=dict(size=10),
+            hovertemplate="%{y}: %{x:,}<extra></extra>",
         ))
         fig_demo.update_layout(
             title=f"Distribution: {dim.replace('_', ' ').title()}",
-            height=max(250, len(sub) * 25 + 100),
-            xaxis_title="Count", margin=dict(l=150)
+            height=max(300, len(sub) * 30 + 100),
+            xaxis_title="Count", margin=dict(l=150),
+            plot_bgcolor="white", xaxis=dict(gridcolor="#e8e8e8"),
         )
         figs.append(fig_demo)
 
-    # --- Ride Share: Aggregate weekly ---
+    # --- Ride Share: Aggregate weekly (stacked bar — cleaner than overlapping area) ---
     label_cats = rs["week_label"].cat.categories.tolist()
     rs_wk = rs.groupby(["yearweek", "week_label"], observed=True).agg(
         snapp_rides=("snapp_rides_total", "sum"),
@@ -591,19 +740,23 @@ def page4_operations(views):
     rs_wk["tapsi_pct"] = rs_wk["tapsi_rides"] / rs_wk["total"] * 100
 
     fig_rs = go.Figure()
-    fig_rs.add_trace(go.Scatter(
+    fig_rs.add_trace(go.Bar(
         x=rs_wk["week_label"], y=rs_wk["snapp_pct"], name="Snapp %",
-        fill="tozeroy", line=dict(color=SNAPP_COLOR)
+        marker_color=SNAPP_COLOR, marker_line=dict(width=0),
+        hovertemplate="Snapp: %{y:.1f}%<extra></extra>",
     ))
-    fig_rs.add_trace(go.Scatter(
+    fig_rs.add_trace(go.Bar(
         x=rs_wk["week_label"], y=rs_wk["tapsi_pct"], name="Tapsi %",
-        fill="tozeroy", line=dict(color=TAPSI_COLOR)
+        marker_color=TAPSI_COLOR, marker_line=dict(width=0),
+        hovertemplate="Tapsi: %{y:.1f}%<extra></extra>",
     ))
     fig_rs.update_layout(
         title="Ride Share: Snapp vs Tapsi Over Time",
-        height=350, yaxis_title="% of Total Rides",
-        hovermode="x unified",
-        legend=dict(orientation="h", y=-0.15)
+        barmode="stack", height=380,
+        yaxis_title="% of Total Rides", yaxis_range=[0, 100],
+        hovermode="x unified", plot_bgcolor="white",
+        yaxis=dict(gridcolor="#e8e8e8"),
+        legend=dict(orientation="h", y=-0.15),
     )
     figs.append(fig_rs)
 
@@ -618,23 +771,39 @@ def page5_survey(views):
     la = views["vw_LongSurveyAnswers"]
     lr = views["vw_LongRareSurveyAnswers"]
 
+    # Color gradient for percentage bars
+    def pct_color(pct, max_pct):
+        """Return a color from light blue to deep blue based on % share."""
+        ratio = min(pct / max(max_pct, 1), 1.0)
+        r = int(220 - 180 * ratio)
+        g = int(235 - 155 * ratio)
+        b = int(255 - 50 * ratio)
+        return f"rgb({r},{g},{b})"
+
     for label, df in [("Main Survey Questions", la), ("Rare Survey Questions", lr)]:
         questions = df.groupby("question")["n"].sum().nlargest(12).index
         for q in questions:
-            sub = df[df["question"] == q].sort_values("n", ascending=True)
+            sub = df[df["question"] == q].sort_values("pct", ascending=True)
             if len(sub) > 15:
                 sub = sub.tail(15)
+            max_pct = sub["pct"].max()
+            bar_colors = [pct_color(p, max_pct) for p in sub["pct"]]
+
             fig_q = go.Figure(go.Bar(
                 y=sub["answer"], x=sub["pct"], orientation="h",
-                marker_color="#3498db", opacity=0.85,
-                text=[f"{p:.1f}% (n={int(n)})" for p, n in zip(sub["pct"], sub["n"])],
-                textposition="outside"
+                marker_color=bar_colors,
+                marker_line=dict(color="rgba(30,80,180,0.3)", width=0.5),
+                text=[f"{p:.1f}% (n={int(n):,})" for p, n in zip(sub["pct"], sub["n"])],
+                textposition="outside", textfont=dict(size=10),
+                hovertemplate="%{y}: %{x:.1f}%<extra></extra>",
             ))
             fig_q.update_layout(
                 title=f"{q}",
-                height=max(280, len(sub) * 28 + 80),
+                height=max(280, len(sub) * 30 + 80),
                 xaxis_title="% of Responses",
-                margin=dict(l=200, r=80)
+                margin=dict(l=220, r=100),
+                plot_bgcolor="white",
+                xaxis=dict(gridcolor="#e8e8e8"),
             )
             figs.append(fig_q)
 
