@@ -21,10 +21,25 @@ SELECT
     TRY_CAST(m.[datetime] AS DATETIME) AS response_datetime,
     m.[_source_file],
     TRY_CAST(m.weeknumber AS INT) AS weeknumber,
-    -- yearweek: e.g. 2501 for week 1 of 2025
+    -- yearweek: e.g. 2501 for week 1 of 2025 (ISO 8601 year + week)
+    -- Uses the stored weeknumber (now ISO week) and the ISO year which
+    -- handles year-boundary correctly (e.g. Dec 31 may be ISO week 1 of next year).
     CASE WHEN TRY_CAST(m.[datetime] AS DATETIME) IS NOT NULL
-         THEN (YEAR(TRY_CAST(m.[datetime] AS DATETIME)) % 100) * 100
-              + TRY_CAST(m.weeknumber AS INT)
+              AND TRY_CAST(m.weeknumber AS INT) IS NOT NULL
+         THEN CASE
+              -- If ISO week >= 52 but month is January, the ISO year is previous year
+              WHEN TRY_CAST(m.weeknumber AS INT) >= 52
+                   AND MONTH(TRY_CAST(m.[datetime] AS DATETIME)) = 1
+              THEN ((YEAR(TRY_CAST(m.[datetime] AS DATETIME)) - 1) % 100) * 100
+                   + TRY_CAST(m.weeknumber AS INT)
+              -- If ISO week = 1 but month is December, the ISO year is next year
+              WHEN TRY_CAST(m.weeknumber AS INT) = 1
+                   AND MONTH(TRY_CAST(m.[datetime] AS DATETIME)) = 12
+              THEN ((YEAR(TRY_CAST(m.[datetime] AS DATETIME)) + 1) % 100) * 100
+                   + TRY_CAST(m.weeknumber AS INT)
+              ELSE (YEAR(TRY_CAST(m.[datetime] AS DATETIME)) % 100) * 100
+                   + TRY_CAST(m.weeknumber AS INT)
+              END
          ELSE NULL END AS yearweek,
     -- driver_type
     CASE WHEN TRY_CAST(m.tapsi_ride AS FLOAT) = 0 OR m.tapsi_ride IS NULL OR m.tapsi_ride = ''

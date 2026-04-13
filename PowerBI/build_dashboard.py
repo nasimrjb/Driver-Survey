@@ -44,29 +44,31 @@ PERSIAN_MONTHS = [
     'Meh', 'Aba', 'Aza', 'Dey', 'Bah', 'Esf',
 ]
 
-def _week_start_saturday(year, weeknum):
-    """Return the Saturday that starts the given Persian week."""
-    jan1 = date(year, 1, 1)
-    days_since_sat = (jan1.weekday() - 5) % 7
-    first_sat = jan1 - timedelta(days=days_since_sat)
-    return first_sat + timedelta(weeks=weeknum - 1)
+def _week_start_monday(year, weeknum):
+    """Return the Monday that starts ISO week `weeknum` of `year`."""
+    # ISO week 1 contains the year's first Thursday.
+    # Jan 4 is always in ISO week 1.
+    jan4 = date(year, 1, 4)
+    # Monday of that week
+    iso_w1_monday = jan4 - timedelta(days=jan4.weekday())
+    return iso_w1_monday + timedelta(weeks=weeknum - 1)
 
 
 def yearweek_to_persian(yw):
-    """Convert 'YY-WW' yearweek string to a Persian week label like 'W4: 29 Dey-5 Bah'."""
+    """Convert 'YY-WW' yearweek string to a Persian week label like '25-W4: 13-19 Dey'."""
     try:
         yy, ww = yw.split('-')
         yr = 2000 + int(yy)
         wk = int(ww)
-        sat = _week_start_saturday(yr, wk)
-        fri = sat + timedelta(days=6)
-        j_sat = jdatetime.date.fromgregorian(date=sat)
-        j_fri = jdatetime.date.fromgregorian(date=fri)
-        m1 = PERSIAN_MONTHS[j_sat.month - 1]
-        m2 = PERSIAN_MONTHS[j_fri.month - 1]
+        mon = _week_start_monday(yr, wk)
+        sun = mon + timedelta(days=6)
+        j_mon = jdatetime.date.fromgregorian(date=mon)
+        j_sun = jdatetime.date.fromgregorian(date=sun)
+        m1 = PERSIAN_MONTHS[j_mon.month - 1]
+        m2 = PERSIAN_MONTHS[j_sun.month - 1]
         if m1 == m2:
-            return f"{yy}-W{wk}: {j_sat.day}-{j_fri.day} {m1}"
-        return f"{yy}-W{wk}: {j_sat.day} {m1}-{j_fri.day} {m2}"
+            return f"{yy}-W{wk}: {j_mon.day}-{j_sun.day} {m1}"
+        return f"{yy}-W{wk}: {j_mon.day} {m1}-{j_sun.day} {m2}"
     except Exception:
         return yw
 
