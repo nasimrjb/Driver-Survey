@@ -185,8 +185,8 @@ def page1_executive(views):
     fig_sat.update_layout(
         title="Weekly Satisfaction Trends (1-5 scale)",
         height=400, hovermode="x unified",
-        legend=dict(orientation="h", y=-0.15),
-        margin=dict(t=40, b=60),
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        margin=dict(t=80, b=60),
         xaxis=dict(categoryorder="array", categoryarray=ws_labels),
     )
     fig_sat.update_yaxes(title_text="Satisfaction (1-5)", range=[1, 5], secondary_y=False)
@@ -218,7 +218,8 @@ def page1_executive(views):
         title=f"Weekly NPS Score (Snapp: {len(nps_valid)} weeks, Tapsi: {len(nps_tapsi)} weeks — rare question)",
         height=350, hovermode="x unified",
         yaxis_title="NPS",
-        legend=dict(orientation="h", y=-0.15),
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        margin=dict(t=80, b=60),
         xaxis=dict(categoryorder="array", categoryarray=nps_labels),
     )
     figs.append(fig_nps)
@@ -241,7 +242,8 @@ def page1_executive(views):
     fig_nps_decomp.update_layout(
         title="Snapp NPS Decomposition (Detractors / Passives / Promoters %)",
         height=350, yaxis_title="%", hovermode="x unified",
-        legend=dict(orientation="h", y=-0.15),
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        margin=dict(t=80, b=60),
         xaxis=dict(categoryorder="array", categoryarray=nps_labels),
     )
     figs.append(fig_nps_decomp)
@@ -255,7 +257,7 @@ def page1_executive(views):
         title="Weekly Response Count",
         height=250, yaxis_title="Responses",
         xaxis=dict(categoryorder="array", categoryarray=ws_labels),
-        margin=dict(t=40, b=30)
+        margin=dict(t=40, b=60)
     )
     figs.append(fig_resp)
 
@@ -295,7 +297,7 @@ def page2_satisfaction(views):
     fig_city.update_layout(
         title="Satisfaction by City",
         height=700, xaxis_title="Satisfaction (1-5)", xaxis_range=[1, 5],
-        legend=dict(orientation="h", y=-0.08),
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
         margin=dict(l=120),
         yaxis=dict(dtick=1),
         xaxis=dict(gridcolor="#e0e0e0", gridwidth=1),
@@ -341,7 +343,7 @@ def page2_satisfaction(views):
             height=max(280, len(sub) * 70 + 120),
             xaxis_title="Satisfaction (1-5)", xaxis_range=[1, 4],
             xaxis=dict(gridcolor="#e0e0e0", gridwidth=1),
-            legend=dict(orientation="h", y=-0.2),
+            legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
             margin=dict(l=120),
             plot_bgcolor="white",
         )
@@ -382,7 +384,7 @@ def page2_satisfaction(views):
     fig_hon = make_subplots(specs=[[{"secondary_y": True}]])
     fig_hon.add_trace(go.Bar(
         x=hm_sorted["tenure_label"], y=hm_sorted["n"], name="Sample Size",
-        marker_color="#e8e8e8", showlegend=True,
+        marker_color="rgba(220,220,220,0.5)", showlegend=True,
         hovertemplate="n=%{y:,}<extra></extra>",
     ), secondary_y=True)
     for col, name, color, dash in [
@@ -403,9 +405,10 @@ def page2_satisfaction(views):
             ), secondary_y=False)
     fig_hon.update_layout(
         title="Honeymoon Effect: Satisfaction by Snapp Tenure",
-        height=420, legend=dict(orientation="h", y=-0.22),
-        xaxis_tickangle=-30, plot_bgcolor="white",
-        xaxis=dict(title="Tenure"),
+        height=420, legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        plot_bgcolor="white",
+        xaxis=dict(title="Tenure", tickangle=-30),
+        margin=dict(t=80, b=60),
     )
     fig_hon.update_yaxes(title_text="Satisfaction (1-5)", range=[1, 5],
                          gridcolor="#e0e0e0", secondary_y=False)
@@ -458,7 +461,7 @@ def page3_incentive(views):
     fig_inc.add_trace(go.Bar(
         x=iw["week_label"], y=iw["snapp_incentive_avg_mrial"],
         name="Avg Incentive (M Rials)",
-        marker_color="rgba(0,200,83,0.35)", marker_line=dict(color=SNAPP_COLOR, width=1),
+        marker_color="rgba(0,200,83,0.3)", marker_line=dict(color="rgba(0,200,83,0.5)", width=1),
         hovertemplate="Incentive: %{y:.2f} M Rials<extra></extra>",
     ), secondary_y=False)
     fig_inc.add_trace(go.Scatter(
@@ -479,7 +482,8 @@ def page3_incentive(views):
     fig_inc.update_layout(
         title="Incentive ROI: Spend vs Satisfaction",
         height=420, hovermode="x unified", plot_bgcolor="white",
-        legend=dict(orientation="h", y=-0.18),
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        margin=dict(t=80, b=60),
         xaxis=dict(categoryorder="array", categoryarray=iw_labels),
     )
     fig_inc.update_yaxes(title_text="Incentive (M Rials)", gridcolor="#e8e8e8",
@@ -488,11 +492,12 @@ def page3_incentive(views):
                          secondary_y=True)
     figs.append(fig_inc)
 
-    # --- Incentive Funnel (area fill to show conversion gap) ---
+    # --- Incentive Funnel (both % of all drivers) ---
     fig_funnel = go.Figure()
     if "snapp_gotmsg_pct" in iw.columns:
         fig_funnel.add_trace(go.Scatter(
-            x=iw["week_label"], y=iw["snapp_gotmsg_pct"], name="Got Message %",
+            x=iw["week_label"], y=iw["snapp_gotmsg_pct"],
+            name="Got Message %",
             line=dict(color="#2196F3", width=2.5), mode="lines+markers",
             marker=dict(size=6), fill="tozeroy",
             fillcolor="rgba(33,150,243,0.15)",
@@ -508,11 +513,12 @@ def page3_incentive(views):
             hovertemplate="Participated: %{y:.1f}%<extra></extra>",
         ))
     fig_funnel.update_layout(
-        title="Incentive Funnel: Message → Participation (gap = drop-off)",
+        title="Incentive Funnel: Message → Participation (% of all drivers, gap = drop-off)",
         height=350, yaxis_title="%", hovermode="x unified",
         plot_bgcolor="white", yaxis=dict(gridcolor="#e8e8e8"),
         xaxis=dict(categoryorder="array", categoryarray=iw_labels),
-        legend=dict(orientation="h", y=-0.2),
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        margin=dict(t=80, b=60),
     )
     figs.append(fig_funnel)
 
@@ -546,39 +552,44 @@ def page3_incentive(views):
         )
         figs.append(fig_types)
 
-    # --- Unsatisfaction Reasons (butterfly / back-to-back) ---
+    # --- Unsatisfaction Reasons (butterfly / back-to-back, % of platform total) ---
     if len(ur) > 0:
         snapp_ur = ur[ur["platform"] == "Snapp"].set_index("reason")
         tapsi_ur = ur[ur["platform"] == "Tapsi"].set_index("reason")
         all_reasons = ur["reason"].unique().tolist()
         fig_unsat = go.Figure()
-        # Snapp on the right (positive)
-        snapp_vals = [int(snapp_ur.loc[r, "n"]) if r in snapp_ur.index else 0
+        # Snapp on the right (positive %), Tapsi on the left (negative %)
+        snapp_pcts = [float(snapp_ur.loc[r, "pct"]) if r in snapp_ur.index else 0
                       for r in all_reasons]
-        tapsi_vals = [-int(tapsi_ur.loc[r, "n"]) if r in tapsi_ur.index else 0
+        tapsi_pcts = [-float(tapsi_ur.loc[r, "pct"]) if r in tapsi_ur.index else 0
                       for r in all_reasons]
+        snapp_ns = [int(snapp_ur.loc[r, "n"]) if r in snapp_ur.index else 0
+                    for r in all_reasons]
+        tapsi_ns = [int(tapsi_ur.loc[r, "n"]) if r in tapsi_ur.index else 0
+                    for r in all_reasons]
         fig_unsat.add_trace(go.Bar(
-            y=all_reasons, x=snapp_vals, name="Snapp",
+            y=all_reasons, x=snapp_pcts, name="Snapp",
             orientation="h", marker_color=SNAPP_COLOR,
-            text=[f"{v:,}" for v in snapp_vals],
+            text=[f"{p:.1f}%" for p in snapp_pcts],
             textposition="outside",
-            hovertemplate="Snapp — %{y}: %{x:,}<extra></extra>",
+            customdata=snapp_ns,
+            hovertemplate="Snapp — %{y}: %{x:.1f}% (n=%{customdata:,})<extra></extra>",
         ))
         fig_unsat.add_trace(go.Bar(
-            y=all_reasons, x=tapsi_vals, name="Tapsi",
+            y=all_reasons, x=tapsi_pcts, name="Tapsi",
             orientation="h", marker_color=TAPSI_COLOR,
-            text=[f"{abs(v):,}" for v in tapsi_vals],
+            text=[f"{abs(p):.1f}%" for p in tapsi_pcts],
             textposition="outside",
-            hovertemplate="Tapsi — %{y}: %{customdata:,}<extra></extra>",
-            customdata=[abs(v) for v in tapsi_vals],
+            customdata=tapsi_ns,
+            hovertemplate="Tapsi — %{y}: %{customdata:.1f}% (n=%{customdata:,})<extra></extra>",
         ))
         fig_unsat.update_layout(
-            title="Incentive Unsatisfaction Reasons (Snapp → | ← Tapsi)",
+            title="Incentive Unsatisfaction Reasons (Snapp → | ← Tapsi) — % of each platform",
             barmode="overlay", height=max(350, len(all_reasons) * 40 + 100),
-            xaxis_title="Count", margin=dict(l=180),
+            xaxis_title="% of Platform's Unsatisfied Drivers", margin=dict(l=180),
             plot_bgcolor="white",
             xaxis=dict(gridcolor="#e8e8e8"),
-            legend=dict(orientation="h", y=-0.15),
+            legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
         )
         figs.append(fig_unsat)
 
@@ -674,7 +685,8 @@ def page4_operations(views):
         yaxis=dict(gridcolor="#e8e8e8"),
         xaxis=dict(categoryorder="array",
                    categoryarray=nav_wk.sort_values("yearweek")["week_label"].unique().tolist()),
-        legend=dict(orientation="h", y=-0.15),
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        margin=dict(t=80, b=60),
     )
     figs.append(fig_nav_wk)
 
@@ -777,7 +789,8 @@ def page4_operations(views):
         hovermode="x unified", plot_bgcolor="white",
         yaxis=dict(gridcolor="#e8e8e8"),
         xaxis=dict(categoryorder="array", categoryarray=ordered_labels),
-        legend=dict(orientation="h", y=-0.15),
+        legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+        margin=dict(t=80, b=60),
     )
     figs.append(fig_rs)
 
@@ -867,8 +880,8 @@ def page6_rideshare_city(views):
             hovermode="x unified", plot_bgcolor="white",
             yaxis=dict(gridcolor="#e8e8e8"),
             xaxis=dict(categoryorder="array", categoryarray=ordered_labels),
-            legend=dict(orientation="h", y=-0.2),
-            margin=dict(t=40, b=60),
+            legend=dict(orientation="h", y=1.08, x=0.5, xanchor="center"),
+            margin=dict(t=80, b=60),
         )
         figs.append(fig)
 

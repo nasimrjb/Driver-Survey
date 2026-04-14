@@ -482,10 +482,9 @@ SELECT
         / COUNT(*) AS snapp_gotmsg_pct,
     SUM(CASE WHEN tapsi_gotmessage_text_incentive = 'Yes' THEN 1 ELSE 0 END) * 100.0
         / NULLIF(SUM(CAST(active_joint AS INT)), 0) AS tapsi_gotmsg_pct,
-    -- Participation rate (among those who got message)
+    -- Participation rate (% of all drivers)
     SUM(CASE WHEN snapp_incentive_participation = 'Yes' THEN 1 ELSE 0 END) * 100.0
-        / NULLIF(SUM(CASE WHEN snapp_gotmessage_text_incentive = 'Yes' THEN 1 ELSE 0 END), 0)
-        AS snapp_participation_pct,
+        / COUNT(*) AS snapp_participation_pct,
     -- Commission-free share
     SUM(snapp_commfree) AS snapp_commfree_total,
     SUM(snapp_ride) AS snapp_ride_total,
@@ -518,8 +517,7 @@ SELECT
     SUM(CASE WHEN snapp_gotmessage_text_incentive = 'Yes' THEN 1 ELSE 0 END) * 100.0
         / COUNT(*) AS snapp_gotmsg_pct,
     SUM(CASE WHEN snapp_incentive_participation = 'Yes' THEN 1 ELSE 0 END) * 100.0
-        / NULLIF(SUM(CASE WHEN snapp_gotmessage_text_incentive = 'Yes' THEN 1 ELSE 0 END), 0)
-        AS snapp_participation_pct,
+        / COUNT(*) AS snapp_participation_pct,
     -- Tapsi incentive (joint drivers only)
     AVG(CASE WHEN active_joint = 1 THEN tapsi_incentive END) AS tapsi_incentive_avg,
     AVG(CASE WHEN active_joint = 1 THEN CAST(tapsi_incentive_satisfaction AS FLOAT) END) AS tapsi_inc_sat_avg,
@@ -711,49 +709,60 @@ GO
 IF OBJECT_ID(N'Cab.vw_WideUnsatisfactionReasons', N'V') IS NOT NULL DROP VIEW Cab.vw_WideUnsatisfactionReasons;
 GO
 CREATE VIEW Cab.vw_WideUnsatisfactionReasons AS
-SELECT platform, reason, SUM(val) AS n
-FROM (
-    SELECT 'Snapp' AS platform, 'Not Available' AS reason,
-        TRY_CAST([Snapp Last Incentive Unsatisfaction__Not Available] AS INT) AS val
-    FROM [Cab].[DriverSurvey_WideMain]
-    UNION ALL
-    SELECT 'Snapp', 'Improper Amount',
-        TRY_CAST([Snapp Last Incentive Unsatisfaction__Improper Amount] AS INT)
-    FROM [Cab].[DriverSurvey_WideMain]
-    UNION ALL
-    SELECT 'Snapp', 'No Time todo',
-        TRY_CAST([Snapp Last Incentive Unsatisfaction__No Time todo] AS INT)
-    FROM [Cab].[DriverSurvey_WideMain]
-    UNION ALL
-    SELECT 'Snapp', 'Difficult',
-        TRY_CAST([Snapp Last Incentive Unsatisfaction__difficult] AS INT)
-    FROM [Cab].[DriverSurvey_WideMain]
-    UNION ALL
-    SELECT 'Snapp', 'Non Payment',
-        TRY_CAST([Snapp Last Incentive Unsatisfaction__Non Payment] AS INT)
-    FROM [Cab].[DriverSurvey_WideMain]
-    UNION ALL
-    SELECT 'Tapsi', 'Not Available',
-        TRY_CAST([Tapsi Incentive Unsatisfaction__Not Available] AS INT)
-    FROM [Cab].[DriverSurvey_WideMain]
-    UNION ALL
-    SELECT 'Tapsi', 'Improper Amount',
-        TRY_CAST([Tapsi Incentive Unsatisfaction__Improper Amount] AS INT)
-    FROM [Cab].[DriverSurvey_WideMain]
-    UNION ALL
-    SELECT 'Tapsi', 'No Time todo',
-        TRY_CAST([Tapsi Incentive Unsatisfaction__No Time todo] AS INT)
-    FROM [Cab].[DriverSurvey_WideMain]
-    UNION ALL
-    SELECT 'Tapsi', 'Difficult',
-        TRY_CAST([Tapsi Incentive Unsatisfaction__difficult] AS INT)
-    FROM [Cab].[DriverSurvey_WideMain]
-    UNION ALL
-    SELECT 'Tapsi', 'Non Payment',
-        TRY_CAST([Tapsi Incentive Unsatisfaction__Non Payment] AS INT)
-    FROM [Cab].[DriverSurvey_WideMain]
-) t
-GROUP BY platform, reason
+WITH raw AS (
+    SELECT platform, reason, SUM(val) AS n
+    FROM (
+        SELECT 'Snapp' AS platform, 'Not Available' AS reason,
+            TRY_CAST([Snapp Last Incentive Unsatisfaction__Not Available] AS INT) AS val
+        FROM [Cab].[DriverSurvey_WideMain]
+        UNION ALL
+        SELECT 'Snapp', 'Improper Amount',
+            TRY_CAST([Snapp Last Incentive Unsatisfaction__Improper Amount] AS INT)
+        FROM [Cab].[DriverSurvey_WideMain]
+        UNION ALL
+        SELECT 'Snapp', 'No Time todo',
+            TRY_CAST([Snapp Last Incentive Unsatisfaction__No Time todo] AS INT)
+        FROM [Cab].[DriverSurvey_WideMain]
+        UNION ALL
+        SELECT 'Snapp', 'Difficult',
+            TRY_CAST([Snapp Last Incentive Unsatisfaction__difficult] AS INT)
+        FROM [Cab].[DriverSurvey_WideMain]
+        UNION ALL
+        SELECT 'Snapp', 'Non Payment',
+            TRY_CAST([Snapp Last Incentive Unsatisfaction__Non Payment] AS INT)
+        FROM [Cab].[DriverSurvey_WideMain]
+        UNION ALL
+        SELECT 'Tapsi', 'Not Available',
+            TRY_CAST([Tapsi Incentive Unsatisfaction__Not Available] AS INT)
+        FROM [Cab].[DriverSurvey_WideMain]
+        UNION ALL
+        SELECT 'Tapsi', 'Improper Amount',
+            TRY_CAST([Tapsi Incentive Unsatisfaction__Improper Amount] AS INT)
+        FROM [Cab].[DriverSurvey_WideMain]
+        UNION ALL
+        SELECT 'Tapsi', 'No Time todo',
+            TRY_CAST([Tapsi Incentive Unsatisfaction__No Time todo] AS INT)
+        FROM [Cab].[DriverSurvey_WideMain]
+        UNION ALL
+        SELECT 'Tapsi', 'Difficult',
+            TRY_CAST([Tapsi Incentive Unsatisfaction__difficult] AS INT)
+        FROM [Cab].[DriverSurvey_WideMain]
+        UNION ALL
+        SELECT 'Tapsi', 'Non Payment',
+            TRY_CAST([Tapsi Incentive Unsatisfaction__Non Payment] AS INT)
+        FROM [Cab].[DriverSurvey_WideMain]
+    ) t
+    GROUP BY platform, reason
+),
+totals AS (
+    SELECT platform, SUM(n) AS platform_total
+    FROM raw
+    GROUP BY platform
+)
+SELECT r.platform, r.reason, r.n,
+       r.n * 100.0 / NULLIF(t.platform_total, 0) AS pct
+FROM raw r
+JOIN totals t ON r.platform = t.platform
 ;
 GO
 
