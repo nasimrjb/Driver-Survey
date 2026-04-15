@@ -101,7 +101,7 @@ toc = [
     'Phase 1: SQL Server Foundation',
     '  1.1 Create Base Tables & Load Data',
     '  1.2 Create SQL Views',
-    '  1.3 YearWeek Formatting',
+    '  1.3 YearWeek Formatting (ISO 8601)',
     'Phase 2: HTML Dashboards',
     '  2.1 Driver Survey Dashboard',
     '  2.2 Routine Analysis Dashboard',
@@ -235,7 +235,7 @@ views_desc = [
     ['vw_Demographics', 'Demographic distributions (age, gender, city, cooperation type, etc.)'],
     ['vw_PersonaByCity', 'Driver persona breakdown by city'],
     ['vw_WideIncentiveTypes', 'Incentive type binary counts and percentages'],
-    ['vw_WideUnsatisfactionReasons', 'Unsatisfaction reason counts by platform'],
+    ['vw_WideUnsatisfactionReasons', 'Unsatisfaction reason counts and percentages by platform'],
     ['vw_LongSurveyAnswers', 'Main survey question-answer distributions'],
     ['vw_LongRareSurveyAnswers', 'Rare survey question-answer distributions'],
 ]
@@ -251,15 +251,25 @@ steps([
 ])
 
 # --- 1.3 ---
-doc.add_heading('1.3 YearWeek Formatting', level=2)
+doc.add_heading('1.3 YearWeek Formatting (ISO 8601)', level=2)
 doc.add_paragraph(
-    'Six views contain a yearweek column. It is formatted as text "YY-WW" (e.g., "25-01") '
+    'Week numbers use standard ISO 8601 (Monday-based, week 1 contains the first Thursday of the year). '
+    'Six views contain a yearweek column formatted as text "YY-WW" (e.g., "25-01") '
     'for clean axis labels, with a companion integer yearweek_sort column (e.g., 2501) '
     'for proper chronological ordering.'
 )
 doc.add_paragraph()
+doc.add_paragraph(
+    'The yearweek integer handles ISO year boundaries: week 52+ in January maps to the previous year, '
+    'and week 1 in December maps to the next year. This avoids overlap issues at year boundaries.'
+)
+doc.add_paragraph()
 doc.add_heading('SQL Formula Used in Views', level=3)
-code("CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,\nyearweek AS yearweek_sort")
+code("CASE WHEN weeknumber >= 52 AND MONTH(datetime) = 1\n"
+     "     THEN ((YEAR(datetime) - 1) % 100) * 100 + weeknumber\n"
+     "     WHEN weeknumber = 1 AND MONTH(datetime) = 12\n"
+     "     THEN ((YEAR(datetime) + 1) % 100) * 100 + weeknumber\n"
+     "     ELSE (YEAR(datetime) % 100) * 100 + weeknumber END AS yearweek")
 doc.add_paragraph()
 doc.add_heading('Views with yearweek', level=3)
 bullets([
@@ -282,9 +292,9 @@ doc.add_heading('2.1 Driver Survey Dashboard', level=2)
 doc.add_paragraph('File: PowerBI/build_dashboard.py')
 doc.add_paragraph('Output: PowerBI/DriverSurvey_Dashboard.html')
 doc.add_paragraph(
-    'Generates an interactive dashboard with Plotly charts covering satisfaction trends, NPS, '
-    'incentive analysis, demographics, navigation usage, and per-question explorers. '
-    'Charts are organized by topic tabs.'
+    'Generates an interactive 6-page dashboard with Plotly charts covering satisfaction trends, NPS, '
+    'incentive analysis, demographics, navigation usage, per-question explorers, and per-city ride share. '
+    'Charts are organized by topic tabs with Persian (Jalali) week labels on all time-series axes.'
 )
 doc.add_heading('How to Generate', level=3)
 steps([
@@ -293,6 +303,26 @@ steps([
     'The script queries all SQL views and generates DriverSurvey_Dashboard.html.',
     'Open the HTML file in a browser to view.',
 ])
+doc.add_paragraph()
+doc.add_heading('Dashboard Pages', level=3)
+add_table(
+    ['Page', 'Tab Name', 'Key Charts'],
+    [
+        ['1', 'Executive Overview', 'KPI cards, weekly satisfaction lines, NPS trend, NPS decomposition, response count'],
+        ['2', 'Satisfaction Deep-Dive', 'City dot plot, demographics dumbbell, honeymoon effect, city×week heatmap'],
+        ['3', 'Incentive Analysis', 'ROI combo (bars+lines), funnel (% of all drivers), lollipop types, butterfly unsatisfaction (%), city dot plot'],
+        ['4', 'Operations & Demographics', 'Navigation donuts, nav market share area, demographic lollipops, gender bar, ride share line'],
+        ['5', 'Survey Explorer', 'Per-question horizontal bars with gradient coloring (main + rare)'],
+        ['6', 'Ride Share by City', 'One Snapp vs Tapsi line chart per city (21 cities)'],
+    ]
+)
+doc.add_paragraph()
+note(
+    'All time-series x-axes show Persian (Jalali) week labels (e.g., "25-W14: 18-24 Far"). '
+    'Legends are positioned above charts to avoid overlap with x-axis labels. '
+    'Charts with background sample-size bars use semi-transparent fills so lines remain visually dominant.'
+)
+doc.add_paragraph()
 
 # --- 2.2 ---
 doc.add_heading('2.2 Routine Analysis Dashboard', level=2)
@@ -662,6 +692,7 @@ visual_spec('Row 3 Left: Engagement Funnel (Line Chart)', [
     ['Y-Axis', 'snapp_gotmsg_pct, snapp_participation_pct'],
     ['Rename', '"Got Message %", "Participated %"'],
     ['Colors', '#42A5F5 (light blue), #1565C0 (dark blue)'],
+    ['Note', 'Both metrics are % of ALL drivers (same denominator). Gap = drop-off.'],
     ['Title', 'Incentive Engagement Funnel'],
 ])
 
