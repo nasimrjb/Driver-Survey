@@ -141,6 +141,10 @@ def fmt(val, col, sheet_name):
 def col_ranges(df, grp_headers=None):
     """Return {col: (lo, hi)} for color-scalable numeric columns."""
     data = df[df.index != "Total"] if "Total" in df.index else df
+    # Ensure all column names are strings (pandas can produce float NaN names)
+    df.columns = [str(c) for c in df.columns]
+    if data is not df:
+        data.columns = df.columns
     rng = {}
     for col in df.columns:
         if col in sra.NON_PCT_COLS:
@@ -176,6 +180,10 @@ def render_table(df, sheet_name, title):
     if df is None or df.empty:
         return f'<div class="table-wrapper"><h3 class="sheet-title">{title}</h3><p class="no-data">No data</p></div>'
 
+    # Normalize column names to strings (avoids AttributeError on float/NaN names)
+    df = df.copy()
+    df.columns = [str(c) for c in df.columns]
+
     grp_headers = None
     for prefix, headers in sra.SHEET_GROUP_HEADERS.items():
         if sheet_name.startswith(prefix) and headers:
@@ -185,6 +193,7 @@ def render_table(df, sheet_name, title):
     ranges = col_ranges(df, grp_headers)
 
     def _disp_col(col):
+        col = str(col) if not isinstance(col, str) else col
         if grp_headers:
             for pfx, _ in grp_headers:
                 if col.startswith(pfx):
