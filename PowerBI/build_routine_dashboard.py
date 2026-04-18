@@ -1,607 +1,449 @@
 """
-Build an interactive HTML dashboard for the Driver Survey Routine Analysis.
-Reads the weekly Excel output and renders it as colored heatmap tables
-that match the Excel conditional-formatting style.
+Driver Survey Routine Analysis — HTML Dashboard
+================================================
+Reads the same processed CSV files as survey_routine_analysis.py and renders
+color-coded matrix tables (city × metric) directly as an HTML dashboard.
+Cutoff values (SHEET_MIN_N) live in survey_routine_analysis.py and are applied
+via sra.apply_min_n_cutoff — exactly as in the Excel version.
 
 Usage:
-    python build_routine_dashboard.py                     # auto-detect latest
-    python build_routine_dashboard.py week_52              # specific week
-    python build_routine_dashboard.py path/to/file.xlsx    # specific file
+    python build_routine_dashboard.py              # auto-detect latest week
+    python build_routine_dashboard.py 52           # specific week number
 """
 
-import os, sys, json, re
+import sys, os, re
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
-# ─── Config ─────────────────────────────────────────────────────────────────
-BASE_DIR = r"D:\Work\Driver Survey"
-PROCESSED_DIR = os.path.join(BASE_DIR, "processed")
-OUTPUT_DIR = os.path.join(BASE_DIR, "PowerBI")
+# ── Locate and import the analysis module ───────────────────────────────────
+SRA_DIR = r"D:\OneDrive\Documents\Snapp\Driver Survey"
+if SRA_DIR not in sys.path:
+    sys.path.insert(0, SRA_DIR)
 
-SNAPP_GREEN = "#00C853"
-TAPSI_ORANGE = "#FF6D00"
-HEADER_BG = "#1e3a5f"
-HEADER_BG_LIGHT = "#D9E1F2"
-GROUP_HEADER_BG = "#4472C4"
-TAB_BG = "#f0f4f8"
-BODY_BG = "#f5f6fa"
+import survey_routine_analysis as sra   # noqa: E402
 
-# Color scale endpoints (matching Excel)
-WHITE = (255, 255, 255)
-GREEN = (99, 190, 123)      # 63BE7B
-RED = (248, 105, 107)       # F8696B
-YELLOW = (255, 235, 132)    # FFEB84
-LIGHT_WHITE = (252, 252, 255)  # FCFCFF
+# ── Output path ─────────────────────────────────────────────────────────────
+OUTPUT = r"D:\Work\Driver Survey\PowerBI\RoutineAnalysis_Dashboard.html"
 
-# ─── Column sets that are NOT percentages ────────────────────────────────────
-NON_PCT_COLS = {
-    "n", "n_joint", "Snapp_n", "Tapsi_n", "ExSnapp_n", "JntSnapp_n",
-    "n_dissatisfied", "n_contacted", "respondent_count", "joint_count",
-    "avg_snapp_LOC", "avg_tapsi_LOC", "avg_snapp_ride", "avg_tapsi_ride",
-    "avg_magical_window_income", "count", "tapsi_carpooling_count",
-    "E_n", "F_n", "G_n",
-    "AvgLOC_All Snapp", "AvgLOC_Joint Snapp",
-    "AvgLOC_Joint Cmpt", "AvgLOC_Joint Cmpt SU",
-    "total Res", "Joint Res", "Ex drivers",
-    "Total Ride", "Total Ride Snapp", "Ex drivers Ride in Snapp",
-    "Snapp Ride", "Tapsi Tide",
-    "RidePerBoarded_Snapp", "RidePerBoarded_Tapsi", "AvgAllRides",
-    "Who Got Message", "Free Comm Drivers",
-    "GotMsg_Money", "GotMsg_Free-Commission",
-    "GotMsg_Money & Free-commission",
-    "Total Rides", "RidesAmong_Total Rides", "RidesAmong_Free Comm Rides",
-    "# Respondents", "# Joint", "# Cmpt Signup",
-    "wheel_usage", "max_demand",
-}
+# ── Brand / UI colors ────────────────────────────────────────────────────────
+SNAPP_GREEN      = "#00C853"
+HEADER_BG        = "#1e3a5f"
+HEADER_BG_LIGHT  = "#D9E1F2"
+GROUP_HEADER_BG  = "#4472C4"
+BODY_BG          = "#f5f6fa"
 
-# Sheets where values are satisfaction scores (1-5), not percentages
-SATISFACTION_PREFIXES = {"#3_Sat_", "#CS_Sat_", "#Carfix_Sat_", "#Garage_Sat_", "#NavReco_"}
+# Excel-matching color scale RGB tuples
+WHITE   = (255, 255, 255)
+GREEN   = (99,  190, 123)   # #63BE7B
+RED     = (248, 105, 107)   # #F8696B
+YELLOW  = (255, 235, 132)   # #FFEB84
+LT_WHT  = (252, 252, 255)   # #FCFCFF — near-white baseline
 
-# Sheets where dissatisfaction → use red scale (higher = worse)
-DISSAT_PREFIXES = {"#8_Dissat", "#9_Dissat"}
-
-# ─── Tab Organization ───────────────────────────────────────────────────────
+# ── Tab group definitions (prefix → tab name) ────────────────────────────────
 TAB_GROUPS = [
-    ("Incentive", [
-        "#1_Snapp_Incentive_Amt",
-        "#2_Tapsi_Incentive_Amt",
-        "#4_Incentive_Duration",
-        "#5_6_IncType",
-        "#8_Dissat",
-        "#9_Dissat_Sum",
-        "#9_Dissat_Sum_LastWk",
-    ]),
-    ("Satisfaction", [
-        "#3_Sat_All Drivers",
-        "#3_Sat_Part-Time",
-        "#3_Sat_Full-Time",
-        "#12_Cities_Overview",
-    ]),
-    ("Market Share", [
-        "#13_RideShare",
-        "#15_Persona_PartTime",
-    ]),
-    ("Operations", [
-        "#14_Nav_",
-        "#15_Persona_",
-        "#17_Inactivity",
-        "#19_LuckyWheel",
-    ]),
-    ("Commission Free", [
-        "#18_CommFree_",
-    ]),
-    ("Support & NPS", [
-        "#CS_Sat_",
-        "#CS_Cat_",
-        "#CS_Reason_",
-        "#Reco_NPS",
-    ]),
-    ("Registration", [
-        "#Refer_",
-        "#Reg_",
-        "#16_Ref_",
-        "#Income_",
-    ]),
-    ("Decline & Demand", [
-        "#Decline_",
-        "#Demand_",
-        "#20_Refusal_",
-    ]),
+    ("Incentive",          ["#1_", "#2_", "#4_", "#5_6_", "#8_", "#9_"]),
+    ("Satisfaction",       ["#3_Sat_", "#12_"]),
+    ("Market Share",       ["#13_", "#15_Persona_PartTime"]),
+    ("Personas",           ["#14_", "#15_", "#16_", "#17_"]),
+    ("Commission & Wheel", ["#18_", "#19_", "#20_"]),
+    ("Support & NPS",      ["#CS_", "#Reco_", "#NavReco_"]),
+    ("Referral & Reg",     ["#Refer_", "#Reg_", "#Income_", "#Decline_"]),
+    ("Services",           ["#Carfix_", "#Garage_"]),
+    ("Operations",         ["#Demand_", "#Speed_", "#DistOrigin_", "#GPS_", "#Unpaid_"]),
 ]
 
+# Satisfaction sheets with fixed 1-5 red/yellow/green scale
+_SAT_FIXED = {"#3_Sat_", "#CS_Sat_", "#Carfix_Sat_", "#Garage_Sat_"}
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  COLOR INTERPOLATION
-# ═══════════════════════════════════════════════════════════════════════════
+# Dissatisfaction sheets: higher = worse (white → red)
+_DISSAT = {"#8_Dissat", "#9_Dissat"}
 
-def lerp_color(c1, c2, t):
-    """Linear interpolation between two RGB tuples, t in [0,1]."""
-    t = max(0, min(1, t))
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  COLOR HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
+
+def lerp(c1, c2, t):
+    t = max(0.0, min(1.0, t))
     return tuple(int(a + (b - a) * t) for a, b in zip(c1, c2))
 
 
-def color_to_css(rgb):
-    return f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
+def css_rgb(c):
+    return f"rgb({c[0]},{c[1]},{c[2]})"
 
 
-def text_color_for_bg(rgb):
-    """Return black or white text depending on background luminance."""
-    lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
-    return "#000" if lum > 140 else "#fff"
+def lum(c):
+    return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
 
 
-def get_color_scale(sheet_name, col_name):
-    """Determine the color scale type (no group context)."""
-    return get_color_scale_with_group(sheet_name, col_name, "")
+def cell_color(val, col, sheet_name, lo, hi):
+    """Return (bg_rgb, text_color_str) for a data cell, or (None, None)."""
+    if pd.isna(val) or col in sra.NON_PCT_COLS or lo == hi:
+        return None, None
 
+    is_pct_col = "Part%" in col or "GotMsg%" in col
+    is_fixed_sat = any(sheet_name.startswith(p) for p in _SAT_FIXED)
+    is_dissat = any(sheet_name.startswith(p) for p in _DISSAT)
 
-def get_color_scale_with_group(sheet_name, col_name, group_name=""):
-    """Determine the color scale type for a given sheet+column+group.
+    t = max(0.0, min(1.0, (val - lo) / (hi - lo))) if hi != lo else 0.0
 
-    Returns: 'green' | 'red' | 'sat_3color' | 'green_abs' | None
-    """
-    col_name = str(col_name)
-    if col_name in NON_PCT_COLS:
-        return None
-    if "WoW" in col_name or "Last" in col_name:
-        return None
-
-    # Dissatisfaction sheets → red scale
-    for prefix in DISSAT_PREFIXES:
-        if sheet_name.startswith(prefix):
-            return "red"
-
-    # Satisfaction sheets → context-aware coloring
-    for prefix in SATISFACTION_PREFIXES:
-        if sheet_name.startswith(prefix):
-            # % columns within sat sheets use green
-            if col_name.endswith("_%") or "Part%" in col_name or "GotMsg%" in col_name:
-                return "green"
-            if "solved" in col_name.lower() or "contacted" in col_name.lower():
-                return "green"
-            # Use group header to determine: % groups → green, Avg/Sat groups → 3-color
-            grp_lower = group_name.lower()
-            if "%" in group_name or "participation" in grp_lower:
-                return "green"
-            if "satisfaction" in grp_lower or "avg" in grp_lower:
-                return "sat_3color"
-            # Fallback: if value range is 0-1, it's probably a percentage
-            return "sat_3color"
-
-    # RideShare: @Tapsi → red, others → green
-    if sheet_name.startswith("#13_RideShare"):
-        if "Tapsi" in col_name and "@" in col_name:
-            return "red"
-
-    # Cities Overview: % Dual SU → red
-    if sheet_name.startswith("#12_Cities"):
-        if "Dual SU" in col_name:
-            return "red"
-
-    return "green"
-
-
-def compute_cell_color(value, col_min, col_max, scale_type):
-    """Compute the background RGB for a cell value given min/max and scale type."""
-    if pd.isna(value) or col_min == col_max:
-        return None
-
-    t = (value - col_min) / (col_max - col_min) if col_max != col_min else 0
-
-    if scale_type == "green":
-        return lerp_color(WHITE, GREEN, t)
-    elif scale_type == "red":
-        return lerp_color(WHITE, RED, t)
-    elif scale_type == "sat_3color":
-        # Map 1-5 scale: 1=red, 3=yellow, 5=green
-        if value <= 3:
-            t2 = (value - 1) / 2 if value >= 1 else 0
-            return lerp_color(RED, YELLOW, t2)
+    if is_fixed_sat and not is_pct_col:
+        # Fixed 1-5 scale: red→yellow→green
+        if val <= 3:
+            t2 = (val - 1) / 2 if val >= 1 else 0.0
+            bg = lerp(RED, YELLOW, t2)
         else:
-            t2 = (value - 3) / 2
-            return lerp_color(YELLOW, GREEN, t2)
-    elif scale_type == "green_abs":
-        return lerp_color(LIGHT_WHITE, GREEN, t)
+            t2 = (val - 3) / 2
+            bg = lerp(YELLOW, GREEN, t2)
+    elif is_dissat:
+        bg = lerp(WHITE, RED, t)
+    elif sheet_name.startswith("#12_Cities_Overview") and "Dual SU" in col:
+        bg = lerp(WHITE, RED, t)
+    elif sheet_name.startswith("#13_RideShare") and "Tapsi" in col and "@" in col:
+        bg = lerp(WHITE, RED, t)
+    else:
+        bg = lerp(LT_WHT, GREEN, t)
 
-    return None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  READ & PARSE EXCEL
-# ═══════════════════════════════════════════════════════════════════════════
-
-def find_latest_excel():
-    """Find the most recent routine_analysis_week_*.xlsx in PROCESSED_DIR."""
-    files = list(Path(PROCESSED_DIR).glob("routine_analysis_week_*.xlsx"))
-    if not files:
-        raise FileNotFoundError(f"No routine_analysis_week_*.xlsx found in {PROCESSED_DIR}")
-    # Sort by week number
-    def week_num(f):
-        m = re.search(r"week_(\d+)", f.name)
-        return int(m.group(1)) if m else 0
-    files.sort(key=week_num)
-    return str(files[-1])
+    text = "#000" if lum(bg) > 140 else "#fff"
+    return bg, text
 
 
-def read_excel_smart(path, sheet_name):
-    """Read a sheet, handling merged/multi-row headers intelligently."""
-    # First pass: read raw to detect header structure
-    raw = pd.read_excel(path, sheet_name=sheet_name, header=None)
+# ══════════════════════════════════════════════════════════════════════════════
+#  VALUE FORMATTING
+# ══════════════════════════════════════════════════════════════════════════════
 
-    if raw.empty or raw.shape[0] < 2:
-        return pd.DataFrame(), None, None
+def fmt(val, col, sheet_name):
+    """Return a display string for a cell value."""
+    if pd.isna(val):
+        return ""
+    if col in sra.NON_PCT_COLS:
+        try:
+            return f"{int(round(float(val))):,}"
+        except (ValueError, TypeError):
+            return str(val)
 
-    # Detect if there's a group header row (row 0 has merged cells with labels)
-    first_row = raw.iloc[0].tolist()
-    second_row = raw.iloc[1].tolist()
+    is_pct_col   = "Part%" in col or "GotMsg%" in col
+    is_fixed_sat = any(sheet_name.startswith(p) for p in _SAT_FIXED)
 
-    # Check if first column of row 0 is "City" → single header row
-    if str(first_row[0]).strip() == "City":
-        df = pd.read_excel(path, sheet_name=sheet_name, header=0)
-        df = df.rename(columns={"Unnamed: 0": "City"})
-        return df, None, None
-
-    # Check if second row starts with "City" → has group header
-    if str(second_row[0]).strip() == "City":
-        # Build group headers from row 0
-        group_headers = {}
-        current_group = None
-        group_start = None
-        for i, val in enumerate(first_row):
-            if pd.notna(val) and str(val).strip():
-                if current_group is not None:
-                    group_headers[current_group] = (group_start, i - 1)
-                current_group = str(val).strip()
-                group_start = i
-            # Handle unnamed columns that are part of merged group
-        if current_group is not None:
-            group_headers[current_group] = (group_start, len(first_row) - 1)
-
-        # Build column names from row 1 (sub-headers)
-        # Determine which group each sub-column belongs to for prefixing
-        col_to_group = {}
-        for gname, (gstart, gend) in group_headers.items():
-            for ci in range(gstart, gend + 1):
-                col_to_group[ci] = gname
-
-        # Build unique internal names AND clean display names
-        col_names = []       # unique internal names for DataFrame
-        display_names = []   # clean names for HTML rendering
-        seen = {}
-        for i, val in enumerate(second_row):
-            display = str(val).strip() if pd.notna(val) else None
-            if display is not None and display.startswith("Unnamed"):
-                display = None
-            # If sub-header is empty, inherit name from group header above
-            if display is None:
-                display = col_to_group.get(i, f"col_{i}")
-            internal = display
-            # Make internal name unique by appending index if duplicate
-            if internal in seen:
-                internal = f"{internal}__{i}"
-            seen[internal] = True
-            col_names.append(internal)
-            display_names.append(display)
-
-        # Data starts at row 2
-        df = raw.iloc[2:].copy()
-        df.columns = col_names
-        df = df.rename(columns={col_names[0]: "City"})
-        display_names[0] = "City"
-        df = df.reset_index(drop=True)
-
-        # Convert numeric columns
-        for col in df.columns:
-            if col != "City":
-                try:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-                except (TypeError, ValueError):
-                    pass
-
-        # Build internal→display mapping
-        display_map = dict(zip(col_names, display_names))
-
-        return df, group_headers, display_map
-
-    # Fallback: just read normally
-    df = pd.read_excel(path, sheet_name=sheet_name, header=0)
-    first_col = df.columns[0]
-    if "Unnamed" in str(first_col):
-        df = df.rename(columns={first_col: "City"})
-    return df, None, None
+    if is_fixed_sat and not is_pct_col:
+        return f"{val:.2f}"
+    if sheet_name.startswith("#NavReco_"):
+        return f"{val:.2f}"
+    if sra.is_pct_sheet(sheet_name):
+        return f"{val:.1f}%"
+    return f"{val:.2f}"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  HTML TABLE RENDERING
-# ═══════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  PER-COLUMN MIN/MAX (group-aware for shared color scales)
+# ══════════════════════════════════════════════════════════════════════════════
 
-def _col_to_group(df_columns, group_headers):
-    """Map each column name → group name (from group_headers).
-
-    group_headers uses raw Excel column indices (0-based).
-    df_columns[0] = 'City' maps to raw index 0.
-    So df_columns[i] maps to raw index i.
-    """
-    if not group_headers:
-        return {}
-    mapping = {}
-    for gname, (gstart, gend) in group_headers.items():
-        for i in range(gstart, gend + 1):
-            if 0 <= i < len(df_columns):
-                mapping[str(df_columns[i])] = gname
-    return mapping
-
-
-def render_table_html(df, sheet_name, group_headers=None, display_map=None):
-    """Render a DataFrame as an HTML table with conditional formatting colors."""
-    if df.empty:
-        return "<p>No data available</p>"
-
-    # display_map: internal col name → clean display name
-    if display_map is None:
-        display_map = {str(c): str(c) for c in df.columns}
-
-    # Build column→group mapping for context-aware coloring
-    col_group = _col_to_group(df.columns, group_headers)
-
-    # Compute column min/max for color scaling
-    col_stats = {}
+def col_ranges(df, grp_headers=None):
+    """Return {col: (lo, hi)} for color-scalable numeric columns."""
+    data = df[df.index != "Total"] if "Total" in df.index else df
+    rng = {}
     for col in df.columns:
-        col_str = str(col)
-        disp = display_map.get(col_str, col_str)
-        if disp == "City" or disp.startswith("col_"):
+        if col in sra.NON_PCT_COLS:
             continue
-        # Use display name for NON_PCT_COLS matching, group for context
-        grp = col_group.get(col_str, "")
-        scale = get_color_scale_with_group(sheet_name, disp, grp)
-        if scale and pd.api.types.is_numeric_dtype(df[col]):
-            valid = df[col].dropna()
-            if len(valid) > 0:
-                if scale == "sat_3color":
-                    col_stats[col_str] = (1, 5, scale)
-                else:
-                    col_stats[col_str] = (valid.min(), valid.max(), scale)
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        vals = pd.to_numeric(data[col], errors="coerce").dropna()
+        if len(vals):
+            rng[col] = (float(vals.min()), float(vals.max()))
 
-    lines = []
-    lines.append('<div class="table-wrapper">')
-    lines.append(f'<h3 class="sheet-title">{sheet_name}</h3>')
-    lines.append('<div class="table-scroll">')
-    lines.append('<table class="heatmap-table">')
+    # Apply group-wide range for grouped sheets
+    if grp_headers:
+        for prefix, _ in grp_headers:
+            grp = [c for c in df.columns if c.startswith(prefix) and c in rng]
+            if len(grp) >= 2:
+                all_v = pd.concat([pd.to_numeric(data[c], errors="coerce") for c in grp]).dropna()
+                if len(all_v):
+                    g_lo, g_hi = float(all_v.min()), float(all_v.max())
+                    for c in grp:
+                        rng[c] = (g_lo, g_hi)
+    return rng
 
-    # ── Group header row (if present) ──
-    if group_headers:
-        lines.append('<tr class="group-header-row">')
-        # Track which columns are covered by groups
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  HTML TABLE RENDERER
+# ══════════════════════════════════════════════════════════════════════════════
+
+_COL_RENAME = {"E_n": "#Resp", "F_n": "#Joint", "G_n": "#Cmpt"}
+
+
+def render_table(df, sheet_name, title):
+    """Render a single DataFrame as a color-coded HTML table block."""
+    if df is None or df.empty:
+        return f'<div class="table-wrapper"><h3 class="sheet-title">{title}</h3><p class="no-data">No data</p></div>'
+
+    grp_headers = None
+    for prefix, headers in sra.SHEET_GROUP_HEADERS.items():
+        if sheet_name.startswith(prefix) and headers:
+            grp_headers = headers
+            break
+
+    ranges = col_ranges(df, grp_headers)
+
+    def _disp_col(col):
+        if grp_headers:
+            for pfx, _ in grp_headers:
+                if col.startswith(pfx):
+                    s = col[len(pfx):]
+                    if s.endswith("_WoW"):
+                        return "WoW"
+                    if s.endswith("_Last"):
+                        return "Last"
+                    return _COL_RENAME.get(s, s)
+        if col.endswith("_WoW"):
+            return "WoW"
+        if col.endswith("_Last"):
+            return "Last"
+        return _COL_RENAME.get(col, col)
+
+    out = [f'<div class="table-wrapper">'
+           f'<h3 class="sheet-title">{title}</h3>'
+           f'<div class="table-scroll"><table class="heatmap-table">']
+    out.append("<thead>")
+
+    # Group header row
+    if grp_headers:
+        out.append('<tr class="group-header-row"><th class="group-header empty-group" rowspan="2">City</th>')
         covered = set()
-        # First: empty cell for City column
-        lines.append(f'<th class="group-header empty-group"></th>')
+        for pfx, label in grp_headers:
+            gcols = [c for c in df.columns if c.startswith(pfx)]
+            if gcols:
+                out.append(f'<th class="group-header" colspan="{len(gcols)}">{label}</th>')
+                covered.update(gcols)
+        for c in df.columns:
+            if c not in covered:
+                out.append('<th class="group-header empty-group"></th>')
+        out.append("</tr>")
+        # Sub-column headers
+        out.append('<tr class="col-header-row">')
+        for col in df.columns:
+            d = _disp_col(col)
+            cls = "col-header count-col" if col in sra.NON_PCT_COLS else "col-header"
+            out.append(f'<th class="{cls}">{d}</th>')
+        out.append("</tr>")
+    else:
+        out.append('<tr class="col-header-row"><th class="col-header">City</th>')
+        for col in df.columns:
+            d = _disp_col(col)
+            cls = "col-header count-col" if col in sra.NON_PCT_COLS else "col-header"
+            out.append(f'<th class="{cls}">{d}</th>')
+        out.append("</tr>")
 
-        # Build a mapping: col_index → group_name
-        col_group_map = {}
-        for gname, (gstart, gend) in group_headers.items():
-            for i in range(gstart, gend + 1):
-                col_group_map[i] = gname
+    out.append("</thead><tbody>")
 
-        # Emit group header cells
-        i = 1  # skip City column (index 0)
-        while i < len(df.columns) + 1:  # +1 because City is col 0 in original
-            actual_i = i  # column index in the original data
-            if actual_i in col_group_map:
-                gname = col_group_map[actual_i]
-                gstart, gend = group_headers[gname]
-                span = gend - gstart + 1
-                # Clamp span to actual columns
-                span = min(span, len(df.columns) + 1 - i)
-                lines.append(f'<th class="group-header" colspan="{span}">{gname}</th>')
-                i += span
-            else:
-                lines.append(f'<th class="group-header empty-group"></th>')
-                i += 1
-        lines.append('</tr>')
-
-    # ── Column header row ──
-    lines.append('<tr class="col-header-row">')
-    for col in df.columns:
-        col_s = str(col)
-        disp = display_map.get(col_s, col_s)
-        if disp in NON_PCT_COLS or col_s in NON_PCT_COLS:
-            css_class = "col-header count-col"
-        else:
-            css_class = "col-header"
-        lines.append(f'<th class="{css_class}">{disp}</th>')
-    lines.append('</tr>')
-
-    # ── Data rows ──
-    for idx in range(len(df)):
-        row = df.iloc[idx]
-        city = str(row.iloc[0]) if len(row) > 0 else ""
+    for city, row in df.iterrows():
         is_total = city == "Total"
-        row_class = "total-row" if is_total else "data-row"
-        lines.append(f'<tr class="{row_class}">')
-
-        for col_idx, col in enumerate(df.columns):
-            col_s = str(col)
-            disp_name = display_map.get(col_s, col_s)
-            val = row.iloc[col_idx]
-
-            if disp_name == "City":
-                lines.append(f'<td class="city-cell">{val}</td>')
+        out.append(f'<tr class="{"total-row" if is_total else "data-row"}">')
+        out.append(f'<td class="city-cell">{city}</td>')
+        for col in df.columns:
+            val = row[col]
+            if pd.isna(val):
+                out.append('<td class="na-cell">-</td>')
                 continue
-
-            # Format value
-            try:
-                is_na = bool(pd.isna(val)) if np.isscalar(val) else False
-            except (ValueError, TypeError):
-                is_na = False
-            if is_na:
-                lines.append('<td class="na-cell">-</td>')
-                continue
-
-            # Determine display format
-            display_val = ""
-            style = ""
-
-            if col_s in col_stats:
-                cmin, cmax, scale = col_stats[col_s]
-                bg = compute_cell_color(val, cmin, cmax, scale)
-                if bg:
-                    text_col = text_color_for_bg(bg)
-                    style = f'background-color:{color_to_css(bg)};color:{text_col}'
-
-            # Format the number based on scale type
-            is_count = disp_name in NON_PCT_COLS
-            cell_scale = col_stats.get(col_s, (None, None, None))[2] if col_s in col_stats else None
-
-            if is_count:
-                if isinstance(val, float) and val == int(val):
-                    display_val = f"{int(val)}"
-                else:
-                    display_val = f"{val:,.1f}" if isinstance(val, float) else str(val)
-            elif cell_scale == "sat_3color":
-                display_val = f"{val:.2f}"
-            elif cell_scale in ("green", "red"):
-                if isinstance(val, (int, float)):
-                    if abs(val) <= 1.5:
-                        display_val = f"{val*100:.1f}%"
-                    else:
-                        display_val = f"{val:.1f}%"
-                else:
-                    display_val = str(val)
-            elif "WoW" in disp_name:
-                if isinstance(val, (int, float)):
-                    sign = "+" if val > 0 else ""
-                    if abs(val) <= 1.5:
-                        display_val = f"{sign}{val*100:.1f}%"
-                    else:
-                        display_val = f"{sign}{val:.2f}"
-                else:
-                    display_val = str(val)
+            lo, hi = ranges.get(col, (0, 1))
+            bg, tc = cell_color(val, col, sheet_name, lo, hi) if not is_total else (None, None)
+            text = fmt(val, col, sheet_name)
+            if bg:
+                out.append(f'<td style="background:{css_rgb(bg)};color:{tc}">{text}</td>')
             else:
-                is_pct_sheet = not any(sheet_name.startswith(p) for p in {"#Demand_"})
-                if is_pct_sheet and isinstance(val, (int, float)) and disp_name not in NON_PCT_COLS:
-                    if abs(val) <= 1.5:
-                        display_val = f"{val*100:.1f}%"
-                    else:
-                        display_val = f"{val:.1f}%"
-                elif isinstance(val, float):
-                    display_val = f"{val:.2f}"
-                else:
-                    display_val = str(val)
+                out.append(f'<td>{text}</td>')
+        out.append("</tr>")
 
-            if style:
-                lines.append(f'<td style="{style}">{display_val}</td>')
-            else:
-                lines.append(f'<td>{display_val}</td>')
-
-        lines.append('</tr>')
-
-    lines.append('</table>')
-    lines.append('</div>')  # table-scroll
-    lines.append('</div>')  # table-wrapper
-
-    return '\n'.join(lines)
+    out.append("</tbody></table></div></div>")
+    return "\n".join(out)
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  ASSEMBLE FULL DASHBOARD
-# ═══════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+#  DATA COLLECTION (same logic as survey_routine_analysis.run_all, no Excel export)
+# ══════════════════════════════════════════════════════════════════════════════
 
-def build_dashboard(excel_path):
-    """Build the full HTML dashboard from an Excel file."""
-    print(f"Reading: {excel_path}")
+def collect_sheets(week=None):
+    """Load CSVs → run analysis → return cleaned dict of DataFrames."""
+    data = sra.load_data()
+    if week is None:
+        week = sra.get_latest_week(data["short_main"])
+    print(f"\nRunning analyses for Week {week}")
+    print("=" * 55)
 
-    # Get week number from filename
-    week_match = re.search(r"week_(\d+)", excel_path)
-    week_num = week_match.group(1) if week_match else "?"
+    sh = {}
 
-    # Read all sheets
-    xl = pd.ExcelFile(excel_path)
-    all_sheets = xl.sheet_names
-    print(f"Found {len(all_sheets)} sheets: {all_sheets[:5]}...")
+    def _s(tag, fn, *a):
+        try:
+            return fn(*a)
+        except Exception as e:
+            print(f"  [skip] {tag}: {e}")
+            return pd.DataFrame()
 
-    # Assign sheets to tabs
-    tab_contents = {}
-    used_sheets = set()
+    def _m(tag, fn, *a):
+        try:
+            return fn(*a)
+        except Exception as e:
+            print(f"  [skip] {tag}: {e}")
+            return {}
 
-    for tab_name, prefixes in TAB_GROUPS:
-        tab_sheets = []
-        for prefix in prefixes:
-            for sname in all_sheets:
-                if sname.startswith(prefix) and sname not in used_sheets:
-                    # Exclude PartTime from Operations (it's in Market Share)
-                    if tab_name == "Operations" and "PartTime" in sname:
-                        continue
-                    tab_sheets.append(sname)
-                    used_sheets.add(sname)
-        if tab_sheets:
-            tab_contents[tab_name] = tab_sheets
+    sh["#1_Snapp_Incentive_Amt"] = _s("#1",  sra.analysis_incentive_amounts_snapp, data, week)
+    sh["#2_Tapsi_Incentive_Amt"] = _s("#2",  sra.analysis_incentive_amounts_tapsi, data, week)
+    for seg, df in _m("#3", sra.analysis_satisfaction_review, data, week).items():
+        sh[f"#3_Sat_{seg[:20]}"] = df
+    sh["#4_Incentive_Duration"] = _s("#4",   sra.analysis_incentive_time_limitation, data, week)
+    sh["#5_6_IncType"]          = _s("#5_6", sra.analysis_received_incentive_types, data, week)
+    try:
+        d = sra.analysis_incentive_dissatisfaction(data, week)
+        sh["#8_Dissat"] = d["combined"]
+        if isinstance(d.get("summary"), pd.DataFrame) and not d["summary"].empty:
+            sh["#9_Dissat_Sum"] = d["summary"]
+        if isinstance(d.get("summary_last_week"), pd.DataFrame) and not d["summary_last_week"].empty:
+            sh["#9_Dissat_Sum_LastWk"] = d["summary_last_week"]
+    except Exception as e:
+        print(f"  [skip] #8/#9 dissatisfaction: {e}")
 
-    # Any remaining sheets go to "Other"
-    remaining = [s for s in all_sheets if s not in used_sheets]
-    if remaining:
-        tab_contents["Other"] = remaining
+    sh["#12_Cities_Overview"]    = _s("#12",    sra.analysis_all_cities_overview, data, week)
+    sh["#13_RideShare"]          = _s("#13",    sra.analysis_ride_share, data, week)
+    for label, df in _m("#14", sra.analysis_navigation_usage, data, week).items():
+        sh[f"#14_Nav_{label[:20]}"] = df
+    for label, df in _m("#15_Persona", sra.analysis_driver_persona, data, week).items():
+        sh[f"#15_Persona_{label[:16]}"] = df
+    sh["#15_Persona_PartTime"]   = _s("#15_PT", sra.analysis_driver_persona_parttime_rides, data, week)
+    for label, df in _m("#16", sra.analysis_referral_plan, data, week).items():
+        sh[f"#16_Ref_{label[:20]}"] = df
+    sh["#17_Inactivity"]         = _s("#17",    sra.analysis_inactivity_before_incentive, data, week)
+    for label, df in _m("#18", sra.analysis_commission_free, data, week).items():
+        sh[f"#18_CommFree_{label}"] = df
+    sh["#19_LuckyWheel"]         = _s("#19",    sra.analysis_lucky_wheel, data, week)
+    for label, df in _m("#20", sra.analysis_request_refusal, data, week).items():
+        sh[f"#20_Refusal_{label.replace(' ','_')[:20]}"] = df
+    for plat, df in _m("#CS_Sat",    sra.analysis_cs_satisfaction,     data, week).items():
+        sh[f"#CS_Sat_{plat}"] = df
+    for label, df in _m("#CS_Cat",   sra.analysis_cs_categories,       data, week).items():
+        sh[f"#CS_Cat_{label.replace(' ','_')[:18]}"] = df
+    for plat, df in _m("#CS_Reason", sra.analysis_cs_important_reason, data, week).items():
+        sh[f"#CS_Reason_{plat}"] = df
+    reco = _s("#Reco", sra.analysis_recommend, data, week)
+    if isinstance(reco, pd.DataFrame) and not reco.empty:
+        sh["#Reco_NPS"] = reco
+    for label, df in _m("#Refer", sra.analysis_refer_others, data, week).items():
+        sh[f"#Refer_{label.replace(' ','_')[:18]}"] = df
+    nav_reco = _s("#NavReco", sra.analysis_navigation_recommendations, data, week)
+    if isinstance(nav_reco, pd.DataFrame) and not nav_reco.empty:
+        sh["#NavReco_Scores"] = nav_reco
+    for label, df in _m("#Reg",    sra.analysis_registration,  data, week).items():
+        sh[f"#Reg_{label.replace(' ','_')[:18]}"] = df
+    for label, df in _m("#Income", sra.analysis_better_income, data, week).items():
+        sh[f"#Income_{label.replace(' ','_')[:18]}"] = df
+    decline = _s("#Decline", sra.analysis_decline_reasons, data, week)
+    if isinstance(decline, pd.DataFrame) and not decline.empty:
+        sh["#Decline_Reasons"] = decline
+    for label, df in _m("#Carfix", sra.analysis_snappcarfix_satisfaction, data, week).items():
+        sh[f"#Carfix_{label[:20]}"] = df
+    for label, df in _m("#Garage", sra.analysis_tapsigarage_satisfaction, data, week).items():
+        sh[f"#Garage_{label[:20]}"] = df
+    for tag, fn, key in [
+        ("#Demand",     sra.analysis_demand,             "#Demand_Perception"),
+        ("#Speed",      sra.analysis_speed_satisfaction, "#Speed_Satisfaction"),
+        ("#DistOrigin", sra.analysis_distance_to_origin, "#DistOrigin_Sat"),
+    ]:
+        v = _s(tag, fn, data, week)
+        if isinstance(v, pd.DataFrame) and not v.empty:
+            sh[key] = v
+    for label, df in _m("#GPS",    sra.analysis_gps,                 data, week).items():
+        sh[f"#GPS_{label.replace(' ','_')[:18]}"] = df
+    for label, df in _m("#Unpaid", sra.analysis_unpaid_by_passenger, data, week).items():
+        sh[f"#Unpaid_{label.replace(' ','_')[:18]}"] = df
 
-    # Build HTML for each tab
-    tab_html = {}
-    for tab_name, sheet_names in tab_contents.items():
-        print(f"\n  Building tab: {tab_name} ({len(sheet_names)} sheets)")
-        html_parts = []
-        for sname in sheet_names:
-            print(f"    Sheet: {sname}")
-            df, grp_headers, col_names = read_excel_smart(excel_path, sname)
-            if df.empty:
-                continue
-            table_html = render_table_html(df, sname, grp_headers, col_names)
-            html_parts.append(table_html)
-        tab_html[tab_name] = '\n'.join(html_parts)
+    # Drop all-NaN-column sheets / empty sheets (mirrors run_all cleanup)
+    meta = {"n", "n_joint", "n_dissatisfied", "n_contacted"}
+    cleaned = {}
+    for name, df in sh.items():
+        if df is None or (isinstance(df, pd.DataFrame) and df.empty):
+            continue
+        drop = {c for c in df.columns if c not in meta and df[c].isna().all()}
+        df = df[[c for c in df.columns if c not in drop]]
+        if not [c for c in df.columns if c not in meta]:
+            continue
+        cleaned[name] = df
 
-    # Count total sheets and rows
-    total_rows = sum(
-        pd.read_excel(excel_path, sheet_name=s).shape[0]
-        for s in all_sheets
-    )
-
-    # Assemble final HTML
-    html = build_full_html(tab_html, week_num, len(all_sheets), total_rows)
-
-    output_path = os.path.join(OUTPUT_DIR, "RoutineAnalysis_Dashboard.html")
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f"\nDashboard saved to: {output_path}")
-    print(f"  Size: {os.path.getsize(output_path) / 1024:.0f} KB")
-    return output_path
+    print(f"\n  {len(cleaned)} sheets ready for rendering.")
+    return cleaned, week
 
 
-def build_full_html(tab_html, week_num, n_sheets, n_rows):
-    """Assemble the full HTML document."""
+# ══════════════════════════════════════════════════════════════════════════════
+#  SHEET PREPARATION (same transforms as Excel export)
+# ══════════════════════════════════════════════════════════════════════════════
 
-    # Build tab buttons
-    tab_buttons = []
-    tab_panels = []
-    for i, (tab_name, content) in enumerate(tab_html.items()):
+def prepare(df, sheet_name):
+    df = sra.sort_cities(df)
+    df = sra.reorder_columns(df, sheet_name)
+    df = sra.apply_min_n_cutoff(df, sheet_name)
+    return df
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  HTML ASSEMBLY
+# ══════════════════════════════════════════════════════════════════════════════
+
+def build_html(sheets, week):
+    tab_panels   = []
+    tab_buttons  = []
+    all_assigned = set()
+
+    for i, (tab_name, prefixes) in enumerate(TAB_GROUPS):
+        # Exact name match OR prefix match
+        matching = {}
+        for k, v in sheets.items():
+            for p in prefixes:
+                if k == p or k.startswith(p):
+                    matching[k] = v
+                    break
+        if not matching:
+            continue
+        all_assigned.update(matching.keys())
+
+        cards = []
+        for sheet_name, df in matching.items():
+            df    = prepare(df, sheet_name)
+            title = sheet_name.lstrip("#").replace("_", " ")
+            cards.append(render_table(df, sheet_name, title))
+
         active = "active" if i == 0 else ""
+        disp   = "block"  if i == 0 else "none"
         tab_buttons.append(
-            f'<button class="tab-btn {active}" onclick="switchTab(event, \'tab-{i}\')">'
+            f'<button class="tab-btn {active}" onclick="switchTab(event,\'tab-{i}\')">'
             f'{tab_name}</button>'
         )
-        display = "block" if i == 0 else "none"
         tab_panels.append(
-            f'<div id="tab-{i}" class="tab-panel" style="display:{display}">'
-            f'{content}</div>'
+            f'<div id="tab-{i}" class="tab-panel" style="display:{disp}">'
+            + "\n".join(cards) + "</div>"
         )
 
-    tab_buttons_html = '\n'.join(tab_buttons)
-    tab_panels_html = '\n'.join(tab_panels)
+    # Unassigned sheets → Other tab
+    unassigned = {k: v for k, v in sheets.items() if k not in all_assigned}
+    if unassigned:
+        idx = len(tab_buttons)
+        cards = []
+        for sheet_name, df in unassigned.items():
+            df    = prepare(df, sheet_name)
+            title = sheet_name.lstrip("#").replace("_", " ")
+            cards.append(render_table(df, sheet_name, title))
+        tab_buttons.append(
+            f'<button class="tab-btn" onclick="switchTab(event,\'tab-{idx}\')">'
+            f'Other</button>'
+        )
+        tab_panels.append(
+            f'<div id="tab-{idx}" class="tab-panel" style="display:none">'
+            + "\n".join(cards) + "</div>"
+        )
 
-    return f'''<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Driver Survey Routine Analysis - Week {week_num}</title>
+<title>Driver Survey Routine Analysis — Week {week}</title>
 <style>
-/* ─── Reset & Base ─────────────────────────────────────────────── */
 *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -609,113 +451,89 @@ body {{
     color: #333;
     line-height: 1.4;
 }}
-
-/* ─── Header ───────────────────────────────────────────────────── */
 .dashboard-header {{
     background: linear-gradient(135deg, {HEADER_BG} 0%, #2c5282 100%);
     color: white;
-    padding: 18px 30px;
-    text-align: center;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    padding: 16px 30px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     position: sticky;
     top: 0;
     z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
 }}
-.dashboard-header h1 {{
-    font-size: 22px;
-    font-weight: 600;
-    margin-bottom: 4px;
-}}
-.dashboard-header .subtitle {{
+.dashboard-header h1 {{ font-size: 20px; font-weight: 600; }}
+.week-badge {{
+    background: {SNAPP_GREEN};
+    color: white;
+    padding: 3px 14px;
+    border-radius: 20px;
     font-size: 13px;
-    opacity: 0.85;
+    font-weight: bold;
 }}
-
-/* ─── Legend ────────────────────────────────────────────────────── */
 .legend-bar {{
     background: white;
     border-bottom: 1px solid #e2e8f0;
-    padding: 8px 30px;
+    padding: 7px 24px;
     display: flex;
-    gap: 24px;
+    gap: 20px;
     align-items: center;
     flex-wrap: wrap;
-    font-size: 12px;
+    font-size: 11px;
     color: #555;
 }}
-.legend-item {{
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}}
-.legend-swatch {{
-    width: 60px;
-    height: 14px;
+.legend-item {{ display: flex; align-items: center; gap: 5px; }}
+.swatch {{
+    width: 56px; height: 12px;
     border-radius: 3px;
     border: 1px solid #ccc;
 }}
-.swatch-green {{
-    background: linear-gradient(90deg, #fff, {color_to_css(GREEN)});
-}}
-.swatch-red {{
-    background: linear-gradient(90deg, #fff, {color_to_css(RED)});
-}}
-.swatch-3color {{
-    background: linear-gradient(90deg, {color_to_css(RED)}, {color_to_css(YELLOW)}, {color_to_css(GREEN)});
-}}
-
-/* ─── Tabs ─────────────────────────────────────────────────────── */
+.sw-green  {{ background: linear-gradient(90deg, {css_rgb(LT_WHT)}, {css_rgb(GREEN)}); }}
+.sw-red    {{ background: linear-gradient(90deg, {css_rgb(WHITE)}, {css_rgb(RED)}); }}
+.sw-3color {{ background: linear-gradient(90deg, {css_rgb(RED)}, {css_rgb(YELLOW)}, {css_rgb(GREEN)}); }}
 .tab-bar {{
-    background: {TAB_BG};
+    background: #f0f4f8;
     border-bottom: 2px solid #e2e8f0;
-    padding: 0 20px;
+    padding: 0 16px;
     display: flex;
     gap: 2px;
     overflow-x: auto;
     position: sticky;
-    top: 70px;
+    top: 56px;
     z-index: 99;
+    scrollbar-width: thin;
 }}
 .tab-btn {{
-    padding: 10px 18px;
+    padding: 9px 16px;
     border: none;
     background: transparent;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
     color: #666;
     cursor: pointer;
     border-bottom: 3px solid transparent;
     white-space: nowrap;
-    transition: all 0.2s;
+    transition: all 0.15s;
 }}
-.tab-btn:hover {{
-    color: #333;
-    background: rgba(0,0,0,0.04);
-}}
+.tab-btn:hover {{ color: #333; background: rgba(0,0,0,0.04); }}
 .tab-btn.active {{
     color: {HEADER_BG};
     border-bottom-color: {HEADER_BG};
     font-weight: 600;
 }}
-
-/* ─── Content ──────────────────────────────────────────────────── */
-.tab-panel {{
-    padding: 20px 24px;
-    max-width: 100%;
-}}
-
-/* ─── Table Wrappers ───────────────────────────────────────────── */
+.tab-panel {{ padding: 16px 20px; }}
 .table-wrapper {{
     background: white;
-    border-radius: 8px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-    margin-bottom: 24px;
+    border-radius: 7px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.08);
+    margin-bottom: 20px;
     overflow: hidden;
 }}
 .sheet-title {{
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
-    padding: 12px 16px 8px;
+    padding: 10px 14px 7px;
     color: {HEADER_BG};
     border-bottom: 1px solid #eee;
     background: #fafbfc;
@@ -723,129 +541,66 @@ body {{
 .table-scroll {{
     overflow-x: auto;
     overflow-y: auto;
-    max-height: 700px;
+    max-height: 680px;
 }}
-
-/* ─── Heatmap Table ────────────────────────────────────────────── */
+.no-data {{ padding: 10px 14px; color: #999; font-style: italic; font-size: 12px; }}
 .heatmap-table {{
     border-collapse: collapse;
-    font-size: 12px;
-    width: 100%;
+    font-size: 11px;
+    white-space: nowrap;
     min-width: max-content;
 }}
 .heatmap-table th,
 .heatmap-table td {{
-    padding: 4px 8px;
+    padding: 3px 8px;
     border: 1px solid #d4d8dd;
     text-align: center;
-    white-space: nowrap;
 }}
-
-/* Group header row (blue band) */
-.group-header-row {{
-    background: {GROUP_HEADER_BG};
-}}
+.group-header-row {{ background: {GROUP_HEADER_BG}; }}
 .group-header {{
     color: white;
     font-weight: 700;
-    font-size: 12px;
-    padding: 6px 10px;
+    font-size: 11px;
+    padding: 5px 9px;
     background: {GROUP_HEADER_BG};
     border-color: #3a6bb5;
 }}
-.empty-group {{
-    background: #e8ecf2;
-}}
-
-/* Column headers */
-.col-header-row {{
-    background: {HEADER_BG_LIGHT};
-}}
+.empty-group {{ background: #e0e6f0; }}
+.col-header-row {{ background: {HEADER_BG_LIGHT}; }}
 .col-header {{
     font-weight: 600;
-    font-size: 11px;
+    font-size: 10px;
     color: #333;
-    padding: 6px 8px;
+    padding: 5px 7px;
     background: {HEADER_BG_LIGHT};
     position: sticky;
     top: 0;
     z-index: 2;
     max-width: 120px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    min-width: 50px;
     white-space: normal;
     word-wrap: break-word;
-    min-width: 55px;
 }}
-.count-col {{
-    background: #f0f0f0;
-    color: #888;
-    font-weight: 500;
-}}
-
-/* City column (frozen) */
+.count-col {{ background: #ebebeb; color: #777; font-weight: 500; }}
+/* Sticky group header + sub-header */
+thead tr:nth-child(1) th {{ position: sticky; top: 0; z-index: 4; }}
+thead tr:nth-child(2) th {{ position: sticky; top: 25px; z-index: 3; }}
 .city-cell {{
-    text-align: left;
+    text-align: left !important;
     font-weight: 500;
     background: white;
     position: sticky;
     left: 0;
-    z-index: 1;
+    z-index: 2;
     border-right: 2px solid #b0b8c4;
-    min-width: 100px;
-    max-width: 140px;
+    min-width: 105px;
+    max-width: 145px;
 }}
-
-/* Total row */
-.total-row {{
-    font-weight: 700;
-    background: #f7f8fa;
-}}
-.total-row .city-cell {{
-    background: #f0f2f5;
-    font-weight: 700;
-}}
-
-/* N/A cells */
-.na-cell {{
-    color: #ccc;
-    font-style: italic;
-}}
-
-/* Data row hover */
-.data-row:hover td {{
-    filter: brightness(0.95);
-}}
-
-/* ─── Responsive ───────────────────────────────────────────────── */
-@media (max-width: 768px) {{
-    .tab-btn {{ padding: 8px 12px; font-size: 12px; }}
-    .tab-panel {{ padding: 12px; }}
-    .heatmap-table {{ font-size: 11px; }}
-}}
-
-/* ─── Search / Filter ──────────────────────────────────────────── */
-.filter-bar {{
-    padding: 8px 16px;
-    background: #fafbfc;
-    border-bottom: 1px solid #eee;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}}
-.filter-input {{
-    padding: 5px 10px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 12px;
-    width: 200px;
-}}
-.filter-label {{
-    font-size: 12px;
-    color: #666;
-}}
-
-/* ─── Print ────────────────────────────────────────────────────── */
+.total-row {{ font-weight: 700; }}
+.total-row td {{ background: #f0f3f8 !important; border-top: 2px solid #8899aa; }}
+.total-row .city-cell {{ background: #e4eaf4 !important; }}
+.na-cell {{ color: #ccc; font-style: italic; font-size: 10px; }}
+.data-row:hover td {{ filter: brightness(0.93); }}
 @media print {{
     .dashboard-header {{ position: static; }}
     .tab-bar {{ display: none; }}
@@ -857,91 +612,74 @@ body {{
 <body>
 
 <div class="dashboard-header">
-    <h1>Driver Survey Routine Analysis</h1>
-    <div class="subtitle">
-        Week {week_num} | {n_sheets} sheets | {n_rows:,} data rows |
-        Generated from SQL Views
-    </div>
+    <h1>Driver Survey — Routine Analysis</h1>
+    <span class="week-badge">Week {week}</span>
 </div>
 
 <div class="legend-bar">
-    <span style="font-weight:600;">Color Scales:</span>
+    <span style="font-weight:600;color:#444">Color scales:</span>
     <div class="legend-item">
-        <div class="legend-swatch swatch-green"></div>
-        <span>Percentage (white &rarr; green = higher)</span>
-    </div>
-    <div class="legend-item">
-        <div class="legend-swatch swatch-red"></div>
-        <span>Dissatisfaction (white &rarr; red = higher)</span>
+        <div class="swatch sw-green"></div>
+        <span>% (white → green)</span>
     </div>
     <div class="legend-item">
-        <div class="legend-swatch swatch-3color"></div>
-        <span>Satisfaction (1-5: red &rarr; yellow &rarr; green)</span>
+        <div class="swatch sw-red"></div>
+        <span>Dissatisfaction (white → red)</span>
     </div>
-    <div class="legend-item" style="margin-left:auto;">
-        <span style="color:#999">Gray n columns = sample size</span>
+    <div class="legend-item">
+        <div class="swatch sw-3color"></div>
+        <span>Satisfaction 1-5 (red → yellow → green)</span>
     </div>
+    <span style="margin-left:auto;color:#aaa;font-size:10px">Gray columns = sample count (no color scale)</span>
 </div>
 
 <div class="tab-bar">
-    {tab_buttons_html}
+    {"".join(tab_buttons)}
 </div>
 
-{tab_panels_html}
+{"".join(tab_panels)}
 
 <script>
 function switchTab(evt, tabId) {{
-    // Hide all panels
     document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
-    // Deactivate all buttons
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    // Show target & activate button
     document.getElementById(tabId).style.display = 'block';
     evt.currentTarget.classList.add('active');
 }}
-
-// City filter
-function filterCities(input) {{
-    const query = input.value.toLowerCase();
-    document.querySelectorAll('.heatmap-table').forEach(table => {{
-        table.querySelectorAll('.data-row, .total-row').forEach(row => {{
-            const city = row.querySelector('.city-cell');
-            if (city) {{
-                const match = city.textContent.toLowerCase().includes(query) ||
-                              row.classList.contains('total-row');
-                row.style.display = match ? '' : 'none';
-            }}
-        }});
-    }});
-}}
 </script>
-
 </body>
-</html>'''
+</html>"""
 
 
-# ═══════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 #  MAIN
-# ═══════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+
+def main():
+    week_arg = None
+    if len(sys.argv) > 1:
+        m = re.search(r"(\d+)", sys.argv[1])
+        if m:
+            week_arg = int(m.group(1))
+
+    print("=" * 55)
+    print("  Driver Survey Routine Dashboard (HTML)")
+    print("=" * 55)
+
+    sheets, week = collect_sheets(week_arg)
+
+    print(f"\nRendering {len(sheets)} tables...")
+    html = build_html(sheets, week)
+
+    os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
+    with open(OUTPUT, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    size_kb = os.path.getsize(OUTPUT) / 1024
+    print(f"\nSaved: {OUTPUT}  ({size_kb:.0f} KB)")
+    print("Opening in browser...")
+    os.startfile(OUTPUT)
+
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        arg = sys.argv[1]
-        if os.path.isfile(arg):
-            excel_path = arg
-        else:
-            # Try to find file matching the argument
-            m = re.search(r"(\d+)", arg)
-            if m:
-                week = m.group(1)
-                excel_path = os.path.join(PROCESSED_DIR, f"routine_analysis_week_{week}.xlsx")
-            else:
-                excel_path = find_latest_excel()
-    else:
-        excel_path = find_latest_excel()
-
-    if not os.path.exists(excel_path):
-        print(f"ERROR: File not found: {excel_path}")
-        sys.exit(1)
-
-    build_dashboard(excel_path)
+    main()

@@ -453,6 +453,10 @@ UNION ALL
 SELECT 'active_time', active_time, COUNT(*)
 FROM Cab.vw_ShortBase WHERE active_time IS NOT NULL AND active_time != '' GROUP BY active_time
 UNION ALL
+-- Driver type (Joint vs Exclusive)
+SELECT 'driver_type', driver_type, COUNT(*)
+FROM Cab.vw_ShortBase WHERE driver_type IS NOT NULL AND driver_type != '' GROUP BY driver_type
+UNION ALL
 -- City
 SELECT 'city', city, COUNT(*)
 FROM Cab.vw_ShortBase WHERE city IS NOT NULL AND city != '' GROUP BY city
