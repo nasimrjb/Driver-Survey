@@ -1129,30 +1129,64 @@ for s in steps_param:
 
 add_heading(doc, "DAX Measure Pattern", 3)
 add_para(doc, (
-    "Create one DAX measure per metric column. The pattern is always the same — "
-    "only the table name, n-column, and value column change:"
+    "Every measure follows the same structure. "
+    "Percentage columns (stored 0-100 in the views) are divided by 100 so Power BI formats them correctly. "
+    "Satisfaction / score columns (1-5 or 0-10 scale) use AVERAGE directly. "
+    "Count columns use SUM."
 ))
 add_code_block(doc, (
     "[Measure Name] =\n"
     "VAR MinN = [Min N Cutoff Value]\n"
-    "VAR RowN = SUM(TableName[n_column])\n"
-    "RETURN IF( RowN >= MinN, AVERAGE(TableName[metric_column]), BLANK() )"
+    "RETURN IF( SUM(ViewName[n_column]) >= MinN,\n"
+    "           AVERAGE(ViewName[metric_column]),   -- or SUM() for counts\n"
+    "           BLANK() )"
 ))
+add_note(doc, (
+    "Percentages stored 0-100 → divide by 100 inside the measure. "
+    "Satisfaction (1-5) and recommendation scores (0-10) → no division. "
+    "Raw counts (rides, respondents) → use SUM not AVERAGE."
+))
+doc.add_paragraph()
 
-add_heading(doc, "Examples — vw_RA_SatReview", 3)
+add_heading(doc, "4.1  vw_RA_SatReview — 18 measures", 2)
+add_para(doc, "Slicers: weeknumber, cooperation_type.  n-cutoff: n (Snapp columns), n_joint (Jnt_ columns).")
 add_code_block(doc, DAX_SAT_REVIEW)
 
-add_heading(doc, "Examples — vw_RA_CitiesOverview (three independent n columns)", 3)
+add_heading(doc, "4.2  vw_RA_CitiesOverview — 10 measures", 2)
+add_para(doc, "Slicer: weeknumber.  Three independent n-cutoffs: E_n / F_n / G_n guard different column groups.")
 add_code_block(doc, DAX_CITIES)
 
-add_heading(doc, "Examples — Long-Format Views", 3)
-add_code_block(doc, DAX_LONG)
+add_heading(doc, "4.3  vw_RA_RideShare — 11 measures", 2)
+add_para(doc, "Slicer: weeknumber.  n-cutoff: total_Res.  Count columns use SUM; percentage columns use AVERAGE / 100.")
+add_code_block(doc, DAX_RIDESHARE)
 
-add_note(doc, (
-    "Percentages in the views are stored as 0-100. Always divide by 100 in the DAX measure "
-    "so Power BI's percentage format displays correctly. "
-    "Satisfaction scores (1-5) should NOT be divided — use AVERAGE() directly."
-))
+add_heading(doc, "4.4  vw_RA_PersonaPartTime — 5 measures", 2)
+add_para(doc, "Slicer: weeknumber.  n-cutoffs: Joint_Res (PT_pct_Joint, RidePerBoarded_*), Ex_drivers (PT_pct_Exclusive), total_Res (AvgAllRides).")
+add_code_block(doc, DAX_PERSONAPT)
+
+add_heading(doc, "4.5  vw_RA_IncentiveAmounts — 1 measure", 2)
+add_para(doc, "Slicers: weeknumber, platform.  Matrix: city = Rows, incentive_range = Columns.")
+add_code_block(doc, DAX_INCAMT)
+
+add_heading(doc, "4.6  vw_RA_IncentiveDuration — 1 measure", 2)
+add_para(doc, "Slicers: weeknumber, platform.  Matrix: city = Rows, duration_bucket = Columns.")
+add_code_block(doc, DAX_INCDUR)
+
+add_heading(doc, "4.7  vw_RA_Persona — 1 measure", 2)
+add_para(doc, "Slicers: weeknumber, dimension.  Matrix: city = Rows, category = Columns.  One measure covers all demographic dimensions.")
+add_code_block(doc, DAX_PERSONA)
+
+add_heading(doc, "4.8  vw_RA_CommFree — 7 measures", 2)
+add_para(doc, "Slicers: weeknumber, platform.  n-cutoff: n.")
+add_code_block(doc, DAX_COMMFREE)
+
+add_heading(doc, "4.9  vw_RA_CSRare — 12 measures", 2)
+add_para(doc, "Slicer: weeknumber.  n-cutoff: n.  Satisfaction scores 1-5 → AVERAGE directly. Solved % → divide by 100.")
+add_code_block(doc, DAX_CSRARE)
+
+add_heading(doc, "4.10  vw_RA_NavReco — 9 measures", 2)
+add_para(doc, "Slicer: weeknumber.  n-cutoff: n.  All scores are 0-10 — do NOT divide by 100.")
+add_code_block(doc, DAX_NAVRECO)
 
 # ── Part 5: Matrix Visuals ─────────────────────────────────────────────────────
 add_heading(doc, "Part 5 — Building Matrix Visuals", 1)
@@ -1188,8 +1222,9 @@ add_summary_table(doc, ["Metric Type", "Color Scale", "Applies To"], cf_rows)
 add_heading(doc, "Part 6 — Week-Over-Week (WoW) in DAX", 1)
 add_para(doc, (
     "The Python script computes WoW by comparing the current week to week-1. "
-    "In Power BI, use a CALCULATE with a weeknumber offset. "
-    "Apply this pattern to any numeric metric column in any view:"
+    "In Power BI, wrap any existing measure in CALCULATE with a weeknumber offset. "
+    "The three examples below cover one measure from each major view type — "
+    "use the same pattern for any other measure by swapping the measure name, view name, and weeknumber column."
 ))
 add_code_block(doc, DAX_WOW)
 
