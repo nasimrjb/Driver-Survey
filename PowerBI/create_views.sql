@@ -909,5 +909,414 @@ GROUP BY city, dimension, category
 GO
 
 
-PRINT 'All 20 views created successfully!';
+-- ============================================================
+-- ROUTINE ANALYSIS VIEWS (replicate survey_routine_analysis.py)
+-- All views: [Cab] schema, prefix vw_RA_
+-- Use these in Power BI matrix reports (city x metric matrices)
+-- ============================================================
+
+-- RA-1. SATISFACTION & PARTICIPATION REVIEW
+-- Replaces: #3_Sat_* sheets (All / Part-Time / Full-Time variants)
+-- N-cutoff:  n (Snapp columns),  n_joint (Jnt_ columns)
+-- Fix: TRY_CAST(active_joint AS INT) in base CTE avoids nvarchar→int implicit conversion
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_SatReview] AS
+WITH base AS (
+    SELECT
+        weeknumber, city, cooperation_type,
+        TRY_CAST(active_joint AS INT) AS is_joint,
+        snapp_gotmessage_text_incentive,
+        tapsi_gotmessage_text_incentive,
+        snapp_incentive_participation,
+        tapsi_incentive_participation,
+        TRY_CAST(snapp_overall_incentive_satisfaction AS FLOAT) AS snapp_inc_sat,
+        TRY_CAST(tapsi_overall_incentive_satisfaction AS FLOAT) AS tapsi_inc_sat,
+        TRY_CAST(snapp_fare_satisfaction           AS FLOAT) AS snapp_fare_sat,
+        TRY_CAST(tapsi_fare_satisfaction           AS FLOAT) AS tapsi_fare_sat,
+        TRY_CAST(snapp_req_count_satisfaction      AS FLOAT) AS snapp_req_sat,
+        TRY_CAST(tapsi_req_count_satisfaction      AS FLOAT) AS tapsi_req_sat,
+        TRY_CAST(snapp_income_satisfaction         AS FLOAT) AS snapp_income_sat,
+        TRY_CAST(tapsi_income_satisfaction         AS FLOAT) AS tapsi_income_sat
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL
+)
+SELECT
+    weeknumber, city, cooperation_type,
+    COUNT(*) AS n,
+    SUM(CASE WHEN is_joint = 1 THEN 1 ELSE 0 END) AS n_joint,
+
+    -- % Incentive Participation
+    100.0 * AVG(CASE WHEN snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+        AS Part_pct_Snapp,
+    100.0 * SUM(CASE WHEN is_joint=1 AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0)
+        AS Part_pct_Jnt_Snapp,
+    100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0)
+        AS Part_pct_Jnt_Tapsi,
+
+    -- % Participation Among Who Got Message
+    100.0 * SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
+        AS Part_GotMsg_pct_Snapp,
+    100.0 * SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
+        AS Part_GotMsg_pct_Jnt_Snapp,
+    100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
+        AS Part_GotMsg_pct_Jnt_Tapsi,
+
+    -- Avg Incentive Satisfaction (1-5)
+    AVG(snapp_inc_sat)                                            AS Incentive_Sat_Snapp,
+    AVG(CASE WHEN is_joint=1 THEN snapp_inc_sat ELSE NULL END)    AS Incentive_Sat_Jnt_Snapp,
+    AVG(CASE WHEN is_joint=1 THEN tapsi_inc_sat ELSE NULL END)    AS Incentive_Sat_Jnt_Tapsi,
+
+    -- Avg Fare Satisfaction (1-5)
+    AVG(snapp_fare_sat)                                           AS Fare_Sat_Snapp,
+    AVG(CASE WHEN is_joint=1 THEN snapp_fare_sat ELSE NULL END)   AS Fare_Sat_Jnt_Snapp,
+    AVG(CASE WHEN is_joint=1 THEN tapsi_fare_sat ELSE NULL END)   AS Fare_Sat_Jnt_Tapsi,
+
+    -- Avg Request Count Satisfaction (1-5)
+    AVG(snapp_req_sat)                                            AS Request_Sat_Snapp,
+    AVG(CASE WHEN is_joint=1 THEN snapp_req_sat ELSE NULL END)    AS Request_Sat_Jnt_Snapp,
+    AVG(CASE WHEN is_joint=1 THEN tapsi_req_sat ELSE NULL END)    AS Request_Sat_Jnt_Tapsi,
+
+    -- Avg Income Satisfaction (1-5)
+    AVG(snapp_income_sat)                                         AS Income_Sat_Snapp,
+    AVG(CASE WHEN is_joint=1 THEN snapp_income_sat ELSE NULL END) AS Income_Sat_Jnt_Snapp,
+    AVG(CASE WHEN is_joint=1 THEN tapsi_income_sat ELSE NULL END) AS Income_Sat_Jnt_Tapsi
+FROM base
+GROUP BY weeknumber, city, cooperation_type;
+GO
+
+
+-- RA-2. CITIES OVERVIEW
+-- Replaces: #12_Cities_Overview
+-- N-cutoff:  E_n, F_n, G_n (three independent groups)
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_CitiesOverview] AS
+WITH src AS (
+    SELECT weeknumber, city,
+        TRY_CAST(active_joint AS INT)    AS is_joint,
+        TRY_CAST(snapp_LOC   AS FLOAT)   AS snapp_loc_f,
+        TRY_CAST(tapsi_LOC   AS FLOAT)   AS tapsi_loc_f,
+        snapp_gotmessage_text_incentive,
+        tapsi_gotmessage_text_incentive
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL
+)
+SELECT
+    weeknumber, city,
+    COUNT(*) AS E_n,
+    SUM(CASE WHEN is_joint = 1 THEN 1 ELSE 0 END) AS F_n,
+    SUM(CASE WHEN tapsi_loc_f > 0   THEN 1 ELSE 0 END) AS G_n,
+
+    -- E-group: all drivers
+    100.0 * AVG(CASE WHEN is_joint = 1    THEN 1.0 ELSE 0.0 END) AS pct_Joint,
+    100.0 * AVG(CASE WHEN tapsi_loc_f > 0 THEN 1.0 ELSE 0.0 END) AS pct_Dual_SU,
+    AVG(snapp_loc_f) AS AvgLOC_All_Snapp,
+    100.0 * AVG(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
+        AS GotMsg_All_Snapp,
+
+    -- F-group: joint drivers
+    AVG(CASE WHEN is_joint=1 THEN snapp_loc_f ELSE NULL END) AS AvgLOC_Joint_Snapp,
+    100.0 * SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS GotMsg_Joint_Snapp,
+    100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS GotMsg_Joint_Cmpt,
+
+    -- G-group: competitor-signup drivers
+    AVG(CASE WHEN is_joint=1        THEN tapsi_loc_f ELSE NULL END) AS AvgLOC_Joint_Cmpt,
+    AVG(CASE WHEN tapsi_loc_f > 0   THEN tapsi_loc_f ELSE NULL END) AS AvgLOC_Joint_Cmpt_SU,
+    100.0 * SUM(CASE WHEN tapsi_loc_f > 0 AND tapsi_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN tapsi_loc_f > 0 THEN 1.0 ELSE 0.0 END),0)
+        AS GotMsg_Joint_Cmpt_SU
+FROM src
+GROUP BY weeknumber, city;
+GO
+
+
+-- RA-3. RIDE SHARE
+-- Replaces: #13_RideShare
+-- N-cutoff:  total_Res
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_RideShare] AS
+WITH src AS (
+    SELECT weeknumber, city,
+        TRY_CAST(active_joint AS INT)  AS is_joint,
+        TRY_CAST(snapp_ride   AS FLOAT) AS snapp_f,
+        TRY_CAST(tapsi_ride   AS FLOAT) AS tapsi_f
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL
+)
+SELECT
+    weeknumber, city,
+    COUNT(*) AS total_Res,
+    SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS Joint_Res,
+    SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END) AS Ex_drivers,
+    ISNULL(SUM(snapp_f),0) + ISNULL(SUM(tapsi_f),0)             AS Total_Ride,
+    ISNULL(SUM(snapp_f),0)                                       AS Total_Ride_Snapp,
+    ISNULL(SUM(CASE WHEN is_joint=0 THEN snapp_f ELSE 0 END),0) AS Ex_Ride_Snapp,
+    ISNULL(SUM(CASE WHEN is_joint=1 THEN snapp_f ELSE 0 END),0) AS Jnt_Snapp_Ride,
+    ISNULL(SUM(CASE WHEN is_joint=1 THEN tapsi_f ELSE 0 END),0) AS Jnt_Tapsi_Ride,
+    100.0 * ISNULL(SUM(snapp_f),0)
+        / NULLIF(ISNULL(SUM(snapp_f),0)+ISNULL(SUM(tapsi_f),0),0) AS All_Snapp_pct,
+    100.0 * ISNULL(SUM(CASE WHEN is_joint=0 THEN snapp_f ELSE 0 END),0)
+        / NULLIF(ISNULL(SUM(snapp_f),0)+ISNULL(SUM(tapsi_f),0),0) AS Ex_Drivers_Snapp_pct,
+    100.0 * ISNULL(SUM(CASE WHEN is_joint=1 THEN snapp_f ELSE 0 END),0)
+        / NULLIF(ISNULL(SUM(snapp_f),0)+ISNULL(SUM(tapsi_f),0),0) AS Jnt_at_Snapp_pct,
+    100.0 * ISNULL(SUM(CASE WHEN is_joint=1 THEN tapsi_f ELSE 0 END),0)
+        / NULLIF(ISNULL(SUM(snapp_f),0)+ISNULL(SUM(tapsi_f),0),0) AS Jnt_at_Tapsi_pct
+FROM src
+GROUP BY weeknumber, city;
+GO
+
+
+-- RA-4. PERSONA PART-TIME
+-- Replaces: #15_Persona_PartTime
+-- N-cutoff:  total_Res (also Joint_Res for PT_pct_Joint, Ex_drivers for PT_pct_Exclusive)
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_PersonaPartTime] AS
+WITH src AS (
+    SELECT weeknumber, city, cooperation_type,
+        TRY_CAST(active_joint AS INT)  AS is_joint,
+        TRY_CAST(snapp_ride   AS FLOAT) AS snapp_f,
+        TRY_CAST(tapsi_ride   AS FLOAT) AS tapsi_f
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL
+)
+SELECT
+    weeknumber, city,
+    COUNT(*) AS total_Res,
+    SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS Joint_Res,
+    SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END) AS Ex_drivers,
+    100.0 * SUM(CASE WHEN is_joint=1 AND cooperation_type='Part-Time' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS PT_pct_Joint,
+    100.0 * SUM(CASE WHEN is_joint=0 AND cooperation_type='Part-Time' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1.0 ELSE 0.0 END),0) AS PT_pct_Exclusive,
+    ISNULL(SUM(CASE WHEN is_joint=1 THEN snapp_f ELSE 0 END),0)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS RidePerBoarded_Snapp,
+    ISNULL(SUM(CASE WHEN is_joint=1 THEN tapsi_f ELSE 0 END),0)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS RidePerBoarded_Tapsi,
+    ISNULL(SUM(snapp_f),0) / NULLIF(COUNT(*),0) AS AvgAllRides
+FROM src
+GROUP BY weeknumber, city;
+GO
+
+
+-- RA-5. INCENTIVE AMOUNTS (long format)
+-- Replaces: #1_Snapp_Incentive_Amt and #2_Tapsi_Incentive_Amt
+-- N-cutoff:  n_total  |  Filter platform = 'Tapsi' for sheet #2
+-- Matrix: city = rows, incentive_range = columns, pct = values
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_IncentiveAmounts] AS
+SELECT
+    weeknumber, city, 'Snapp' AS platform,
+    snapp_incentive_rial_details AS incentive_range,
+    COUNT(*) AS n_range,
+    SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total,
+    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city),0) AS pct
+FROM [Cab].[DriverSurvey_ShortMain]
+WHERE city IS NOT NULL AND snapp_incentive_rial_details IS NOT NULL
+GROUP BY weeknumber, city, snapp_incentive_rial_details
+UNION ALL
+SELECT
+    weeknumber, city, 'Tapsi' AS platform,
+    tapsi_incentive_rial_details AS incentive_range,
+    COUNT(*) AS n_range,
+    SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total,
+    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city),0) AS pct
+FROM [Cab].[DriverSurvey_ShortMain]
+WHERE city IS NOT NULL AND tapsi_incentive_rial_details IS NOT NULL
+  AND TRY_CAST(active_joint AS INT) = 1
+GROUP BY weeknumber, city, tapsi_incentive_rial_details;
+GO
+
+
+-- RA-6. INCENTIVE DURATION (long format)
+-- Replaces: #4_Incentive_Duration
+-- N-cutoff:  n_total
+-- Matrix: city = rows, duration_bucket = columns, pct = values
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_IncentiveDuration] AS
+SELECT weeknumber, city, 'Snapp' AS platform,
+    snapp_incentive_active_duration AS duration_bucket,
+    COUNT(*) AS n_range,
+    SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total,
+    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city),0) AS pct
+FROM [Cab].[DriverSurvey_ShortMain]
+WHERE city IS NOT NULL AND snapp_incentive_active_duration IS NOT NULL
+GROUP BY weeknumber, city, snapp_incentive_active_duration
+UNION ALL
+SELECT weeknumber, city, 'Tapsi' AS platform,
+    tapsi_incentive_active_duration AS duration_bucket,
+    COUNT(*) AS n_range,
+    SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total,
+    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city),0) AS pct
+FROM [Cab].[DriverSurvey_ShortMain]
+WHERE city IS NOT NULL AND tapsi_incentive_active_duration IS NOT NULL
+GROUP BY weeknumber, city, tapsi_incentive_active_duration;
+GO
+
+
+-- RA-7. PERSONA (long format — all demographic dimensions)
+-- Replaces: all #15_Persona sub-sheets
+-- N-cutoff:  n_total
+-- Slicer on 'dimension'; Matrix: city = rows, category = columns, pct = values
+-- Fix: CAST(edu/marr_stat AS NVARCHAR) prevents UNION ALL type-precedence error when
+--      those columns are stored as numeric in ShortMain
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_Persona] AS
+WITH activity AS (
+    SELECT weeknumber, city, 'Activity Type' AS dimension,
+        CAST(active_time AS NVARCHAR(100)) AS category,
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL AND active_time IS NOT NULL
+    GROUP BY weeknumber, city, active_time),
+age_grp AS (
+    SELECT weeknumber, city, 'Age Group' AS dimension,
+        CAST(age_group AS NVARCHAR(100)) AS category,
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL AND age_group IS NOT NULL
+    GROUP BY weeknumber, city, age_group),
+edu AS (
+    SELECT weeknumber, city, 'Education' AS dimension,
+        CAST(edu AS NVARCHAR(100)) AS category,
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL AND edu IS NOT NULL
+    GROUP BY weeknumber, city, edu),
+marr AS (
+    SELECT weeknumber, city, 'Marital Status' AS dimension,
+        CAST(marr_stat AS NVARCHAR(100)) AS category,
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL AND marr_stat IS NOT NULL
+    GROUP BY weeknumber, city, marr_stat),
+gen AS (
+    SELECT weeknumber, city, 'Gender' AS dimension,
+        CAST(gender AS NVARCHAR(100)) AS category,
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL AND gender IS NOT NULL
+    GROUP BY weeknumber, city, gender),
+coop AS (
+    SELECT weeknumber, city, 'Cooperation Type' AS dimension,
+        CAST(cooperation_type AS NVARCHAR(100)) AS category,
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL AND cooperation_type IS NOT NULL
+    GROUP BY weeknumber, city, cooperation_type)
+SELECT *, 100.0 * n / NULLIF(n_total,0) AS pct FROM activity
+UNION ALL SELECT *, 100.0 * n / NULLIF(n_total,0) AS pct FROM age_grp
+UNION ALL SELECT *, 100.0 * n / NULLIF(n_total,0) AS pct FROM edu
+UNION ALL SELECT *, 100.0 * n / NULLIF(n_total,0) AS pct FROM marr
+UNION ALL SELECT *, 100.0 * n / NULLIF(n_total,0) AS pct FROM gen
+UNION ALL SELECT *, 100.0 * n / NULLIF(n_total,0) AS pct FROM coop;
+GO
+
+
+-- RA-8. COMMISSION-FREE INCENTIVE
+-- Replaces: #18_CommFree_Snapp and #18_CommFree_Tapsi
+-- N-cutoff:  n
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_CommFree] AS
+WITH src AS (
+    SELECT weeknumber, city,
+        TRY_CAST(active_joint  AS INT)   AS is_joint,
+        TRY_CAST(snapp_commfree AS FLOAT) AS snapp_cf,
+        TRY_CAST(tapsi_commfree AS FLOAT) AS tapsi_cf,
+        snapp_gotmessage_text_incentive,
+        tapsi_gotmessage_text_incentive,
+        CAST(snapp_incentive_category AS NVARCHAR(100)) AS snapp_inc_cat,
+        CAST(tapsi_incentive_category AS NVARCHAR(100)) AS tapsi_inc_cat,
+        snapp_incentive_participation,
+        tapsi_incentive_participation
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL
+)
+SELECT weeknumber, city, 'Snapp' AS platform,
+    COUNT(*) AS n,
+    SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END) AS Who_Got_Message,
+    SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_inc_cat='Money' THEN 1 ELSE 0 END) AS GotMsg_Money,
+    SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_inc_cat='Free-Commission' THEN 1 ELSE 0 END) AS GotMsg_FreeComm,
+    SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_inc_cat='Money & Free-commission' THEN 1 ELSE 0 END) AS GotMsg_Money_FreeComm,
+    SUM(CASE WHEN snapp_cf > 0 THEN 1 ELSE 0 END) AS Free_Comm_Drivers,
+    100.0 * SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*),0)
+        AS pct_Got_Message,
+    100.0 * SUM(CASE WHEN snapp_cf > 0 THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*),0)
+        AS pct_Free_Comm_Ride
+FROM src
+GROUP BY weeknumber, city
+UNION ALL
+SELECT weeknumber, city, 'Tapsi' AS platform,
+    SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS n,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END) AS Who_Got_Message,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_inc_cat='Money' THEN 1 ELSE 0 END) AS GotMsg_Money,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_inc_cat='Free-Commission' THEN 1 ELSE 0 END) AS GotMsg_FreeComm,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_inc_cat='Money & Free-commission' THEN 1 ELSE 0 END) AS GotMsg_Money_FreeComm,
+    SUM(CASE WHEN is_joint=1 AND tapsi_cf > 0 THEN 1 ELSE 0 END) AS Free_Comm_Drivers,
+    100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS pct_Got_Message,
+    100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_cf > 0 THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS pct_Free_Comm_Ride
+FROM src
+GROUP BY weeknumber, city;
+GO
+
+
+-- RA-9. CUSTOMER SUPPORT SATISFACTION (from ShortRare)
+-- Replaces: #CS_Sat_Snapp and #CS_Sat_Tapsi sheets
+-- N-cutoff:  n
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_CSRare] AS
+SELECT
+    sm.weeknumber, sm.city,
+    COUNT(*) AS n,
+    AVG(TRY_CAST(sr.snapp_CS_satisfaction_overall   AS FLOAT)) AS Snapp_CS_Overall,
+    AVG(TRY_CAST(sr.snapp_CS_satisfaction_waittime  AS FLOAT)) AS Snapp_CS_WaitTime,
+    AVG(TRY_CAST(sr.snapp_CS_satisfaction_solution  AS FLOAT)) AS Snapp_CS_Solution,
+    AVG(TRY_CAST(sr.snapp_CS_satisfaction_behaviour AS FLOAT)) AS Snapp_CS_Behaviour,
+    AVG(TRY_CAST(sr.snapp_CS_satisfaction_relevance AS FLOAT)) AS Snapp_CS_Relevance,
+    100.0 * AVG(CASE WHEN sr.snapp_CS_solved='Yes' THEN 1.0 ELSE 0.0 END) AS Snapp_CS_Solved_pct,
+    AVG(TRY_CAST(sr.tapsi_CS_satisfaction_overall   AS FLOAT)) AS Tapsi_CS_Overall,
+    AVG(TRY_CAST(sr.tapsi_CS_satisfaction_waittime  AS FLOAT)) AS Tapsi_CS_WaitTime,
+    AVG(TRY_CAST(sr.tapsi_CS_satisfaction_solution  AS FLOAT)) AS Tapsi_CS_Solution,
+    AVG(TRY_CAST(sr.tapsi_CS_satisfaction_behaviour AS FLOAT)) AS Tapsi_CS_Behaviour,
+    AVG(TRY_CAST(sr.tapsi_CS_satisfaction_relevance AS FLOAT)) AS Tapsi_CS_Relevance,
+    100.0 * AVG(CASE WHEN sr.tapsi_CS_solved='Yes' THEN 1.0 ELSE 0.0 END) AS Tapsi_CS_Solved_pct
+FROM [Cab].[DriverSurvey_ShortRare]  sr
+JOIN [Cab].[DriverSurvey_ShortMain]  sm ON sm.recordID = sr.recordID
+WHERE sm.city IS NOT NULL
+GROUP BY sm.weeknumber, sm.city;
+GO
+
+
+-- RA-10. NAVIGATION & NPS RECOMMENDATION SCORES (from ShortRare)
+-- Replaces: #NavReco_Scores and #Reco_NPS sheets
+-- N-cutoff:  n
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_NavReco] AS
+SELECT
+    sm.weeknumber, sm.city,
+    COUNT(*) AS n,
+    AVG(TRY_CAST(sr.snapp_recommend               AS FLOAT)) AS Snapp_NPS,
+    AVG(TRY_CAST(sr.snappdriver_tapsi_recommend    AS FLOAT)) AS Tapsi_NPS_SnapDriver,
+    AVG(TRY_CAST(sr.tapsidriver_tapsi_recommend    AS FLOAT)) AS Tapsi_NPS_TapsiDriver,
+    AVG(TRY_CAST(sr.recommendation_googlemap       AS FLOAT)) AS Reco_GoogleMap,
+    AVG(TRY_CAST(sr.recommendation_waze            AS FLOAT)) AS Reco_Waze,
+    AVG(TRY_CAST(sr.recommendation_neshan          AS FLOAT)) AS Reco_Neshan,
+    AVG(TRY_CAST(sr.recommendation_balad           AS FLOAT)) AS Reco_Balad,
+    AVG(TRY_CAST(sr.snapp_navigation_app_satisfaction    AS FLOAT)) AS Snapp_Nav_Sat,
+    AVG(TRY_CAST(sr.tapsi_in_app_navigation_satisfaction AS FLOAT)) AS Tapsi_Nav_Sat
+FROM [Cab].[DriverSurvey_ShortRare]  sr
+JOIN [Cab].[DriverSurvey_ShortMain]  sm ON sm.recordID = sr.recordID
+WHERE sm.city IS NOT NULL
+GROUP BY sm.weeknumber, sm.city;
+GO
+
+
+PRINT 'All 30 views created successfully (20 dashboard views + 10 routine analysis views)!';
 GO
