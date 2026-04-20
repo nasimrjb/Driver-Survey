@@ -217,15 +217,25 @@ def render_table(df, sheet_name, title):
     # Group header row
     if grp_headers:
         out.append('<tr class="group-header-row"><th class="group-header empty-group" rowspan="2">City</th>')
-        covered = set()
+        # Map each column to its group prefix+label (if any)
+        col_group = {}  # col → (pfx, label)
         for pfx, label in grp_headers:
-            gcols = [c for c in df.columns if c.startswith(pfx)]
-            if gcols:
-                out.append(f'<th class="group-header" colspan="{len(gcols)}">{label}</th>')
-                covered.update(gcols)
+            for c in df.columns:
+                if c.startswith(pfx):
+                    col_group[c] = (pfx, label)
+        # Walk columns in order: emit a plain empty cell for uncovered cols
+        # (so they align correctly in row 1 above the matching row-2 sub-headers),
+        # and emit a group header (colspan) on the first col of each group.
+        emitted_groups = set()
         for c in df.columns:
-            if c not in covered:
+            if c not in col_group:
                 out.append('<th class="group-header empty-group"></th>')
+            else:
+                pfx, label = col_group[c]
+                if pfx not in emitted_groups:
+                    gcols = [c2 for c2 in df.columns if c2 in col_group and col_group[c2][0] == pfx]
+                    out.append(f'<th class="group-header" colspan="{len(gcols)}">{label}</th>')
+                    emitted_groups.add(pfx)
         out.append("</tr>")
         # Sub-column headers
         out.append('<tr class="col-header-row">')
