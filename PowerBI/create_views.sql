@@ -921,6 +921,13 @@ GO
 -- Fix: TRY_CAST(active_joint AS INT) in base CTE avoids nvarchar→int implicit conversion
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_SatReview] AS
+-- BUG FIX: Added UNION ALL to include an 'All Drivers' aggregate row per
+-- (weeknumber, city).  The Python script computes "All Drivers" over ALL
+-- respondents regardless of cooperation_type, so a simple AVERAGE of the
+-- type-specific rows would give an unweighted (wrong) result in DAX.
+-- Filter in Power BI: cooperation_type = 'All Drivers' for the All page,
+--                     cooperation_type = 'Part-Time'   for the Part-Time page,
+--                     cooperation_type = 'Full-Time'   for the Full-Time page.
 WITH base AS (
     SELECT
         weeknumber, city, cooperation_type,
@@ -939,54 +946,104 @@ WITH base AS (
         TRY_CAST(tapsi_income_satisfaction         AS FLOAT) AS tapsi_income_sat
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL
+),
+agg AS (
+    SELECT
+        weeknumber, city, cooperation_type,
+        COUNT(*) AS n,
+        SUM(CASE WHEN is_joint = 1 THEN 1 ELSE 0 END) AS n_joint,
+
+        -- % Incentive Participation
+        100.0 * AVG(CASE WHEN snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            AS Part_pct_Snapp,
+        100.0 * SUM(CASE WHEN is_joint=1 AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0)
+            AS Part_pct_Jnt_Snapp,
+        100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0)
+            AS Part_pct_Jnt_Tapsi,
+
+        -- % Participation Among Who Got Message
+        100.0 * SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            / NULLIF(SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
+            AS Part_GotMsg_pct_Snapp,
+        100.0 * SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
+            AS Part_GotMsg_pct_Jnt_Snapp,
+        100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
+            AS Part_GotMsg_pct_Jnt_Tapsi,
+
+        -- Avg Incentive Satisfaction (1-5)
+        AVG(snapp_inc_sat)                                            AS Incentive_Sat_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN snapp_inc_sat ELSE NULL END)    AS Incentive_Sat_Jnt_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN tapsi_inc_sat ELSE NULL END)    AS Incentive_Sat_Jnt_Tapsi,
+
+        -- Avg Fare Satisfaction (1-5)
+        AVG(snapp_fare_sat)                                           AS Fare_Sat_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN snapp_fare_sat ELSE NULL END)   AS Fare_Sat_Jnt_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN tapsi_fare_sat ELSE NULL END)   AS Fare_Sat_Jnt_Tapsi,
+
+        -- Avg Request Count Satisfaction (1-5)
+        AVG(snapp_req_sat)                                            AS Request_Sat_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN snapp_req_sat ELSE NULL END)    AS Request_Sat_Jnt_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN tapsi_req_sat ELSE NULL END)    AS Request_Sat_Jnt_Tapsi,
+
+        -- Avg Income Satisfaction (1-5)
+        AVG(snapp_income_sat)                                         AS Income_Sat_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN snapp_income_sat ELSE NULL END) AS Income_Sat_Jnt_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN tapsi_income_sat ELSE NULL END) AS Income_Sat_Jnt_Tapsi
+    FROM base
+    GROUP BY weeknumber, city, cooperation_type
+),
+all_drv AS (
+    -- "All Drivers" synthetic row: same formulas, no cooperation_type filter.
+    -- Matches Python's lambda d: d  (no segment filter on the week slice).
+    SELECT
+        weeknumber, city, 'All Drivers' AS cooperation_type,
+        COUNT(*) AS n,
+        SUM(CASE WHEN is_joint = 1 THEN 1 ELSE 0 END) AS n_joint,
+
+        100.0 * AVG(CASE WHEN snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            AS Part_pct_Snapp,
+        100.0 * SUM(CASE WHEN is_joint=1 AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0)
+            AS Part_pct_Jnt_Snapp,
+        100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0)
+            AS Part_pct_Jnt_Tapsi,
+
+        100.0 * SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            / NULLIF(SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
+            AS Part_GotMsg_pct_Snapp,
+        100.0 * SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
+            AS Part_GotMsg_pct_Jnt_Snapp,
+        100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+            / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
+            AS Part_GotMsg_pct_Jnt_Tapsi,
+
+        AVG(snapp_inc_sat)                                            AS Incentive_Sat_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN snapp_inc_sat ELSE NULL END)    AS Incentive_Sat_Jnt_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN tapsi_inc_sat ELSE NULL END)    AS Incentive_Sat_Jnt_Tapsi,
+
+        AVG(snapp_fare_sat)                                           AS Fare_Sat_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN snapp_fare_sat ELSE NULL END)   AS Fare_Sat_Jnt_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN tapsi_fare_sat ELSE NULL END)   AS Fare_Sat_Jnt_Tapsi,
+
+        AVG(snapp_req_sat)                                            AS Request_Sat_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN snapp_req_sat ELSE NULL END)    AS Request_Sat_Jnt_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN tapsi_req_sat ELSE NULL END)    AS Request_Sat_Jnt_Tapsi,
+
+        AVG(snapp_income_sat)                                         AS Income_Sat_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN snapp_income_sat ELSE NULL END) AS Income_Sat_Jnt_Snapp,
+        AVG(CASE WHEN is_joint=1 THEN tapsi_income_sat ELSE NULL END) AS Income_Sat_Jnt_Tapsi
+    FROM base
+    GROUP BY weeknumber, city
 )
-SELECT
-    weeknumber, city, cooperation_type,
-    COUNT(*) AS n,
-    SUM(CASE WHEN is_joint = 1 THEN 1 ELSE 0 END) AS n_joint,
-
-    -- % Incentive Participation
-    100.0 * AVG(CASE WHEN snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
-        AS Part_pct_Snapp,
-    100.0 * SUM(CASE WHEN is_joint=1 AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
-        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0)
-        AS Part_pct_Jnt_Snapp,
-    100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
-        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0)
-        AS Part_pct_Jnt_Tapsi,
-
-    -- % Participation Among Who Got Message
-    100.0 * SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
-        / NULLIF(SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
-        AS Part_GotMsg_pct_Snapp,
-    100.0 * SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
-        / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
-        AS Part_GotMsg_pct_Jnt_Snapp,
-    100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
-        / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END),0)
-        AS Part_GotMsg_pct_Jnt_Tapsi,
-
-    -- Avg Incentive Satisfaction (1-5)
-    AVG(snapp_inc_sat)                                            AS Incentive_Sat_Snapp,
-    AVG(CASE WHEN is_joint=1 THEN snapp_inc_sat ELSE NULL END)    AS Incentive_Sat_Jnt_Snapp,
-    AVG(CASE WHEN is_joint=1 THEN tapsi_inc_sat ELSE NULL END)    AS Incentive_Sat_Jnt_Tapsi,
-
-    -- Avg Fare Satisfaction (1-5)
-    AVG(snapp_fare_sat)                                           AS Fare_Sat_Snapp,
-    AVG(CASE WHEN is_joint=1 THEN snapp_fare_sat ELSE NULL END)   AS Fare_Sat_Jnt_Snapp,
-    AVG(CASE WHEN is_joint=1 THEN tapsi_fare_sat ELSE NULL END)   AS Fare_Sat_Jnt_Tapsi,
-
-    -- Avg Request Count Satisfaction (1-5)
-    AVG(snapp_req_sat)                                            AS Request_Sat_Snapp,
-    AVG(CASE WHEN is_joint=1 THEN snapp_req_sat ELSE NULL END)    AS Request_Sat_Jnt_Snapp,
-    AVG(CASE WHEN is_joint=1 THEN tapsi_req_sat ELSE NULL END)    AS Request_Sat_Jnt_Tapsi,
-
-    -- Avg Income Satisfaction (1-5)
-    AVG(snapp_income_sat)                                         AS Income_Sat_Snapp,
-    AVG(CASE WHEN is_joint=1 THEN snapp_income_sat ELSE NULL END) AS Income_Sat_Jnt_Snapp,
-    AVG(CASE WHEN is_joint=1 THEN tapsi_income_sat ELSE NULL END) AS Income_Sat_Jnt_Tapsi
-FROM base
-GROUP BY weeknumber, city, cooperation_type;
+SELECT * FROM agg
+UNION ALL
+SELECT * FROM all_drv;
 GO
 
 
