@@ -11,7 +11,9 @@ Usage:
     python build_routine_dashboard.py 52           # specific week number
 """
 
-import sys, os, re
+import sys
+import os
+import re
 import numpy as np
 import pandas as pd
 
@@ -26,18 +28,18 @@ import survey_routine_analysis as sra   # noqa: E402
 OUTPUT = r"D:\Work\Driver Survey\PowerBI\RoutineAnalysis_Dashboard.html"
 
 # ── Brand / UI colors ────────────────────────────────────────────────────────
-SNAPP_GREEN      = "#00C853"
-HEADER_BG        = "#1e3a5f"
-HEADER_BG_LIGHT  = "#D9E1F2"
-GROUP_HEADER_BG  = "#4472C4"
-BODY_BG          = "#f5f6fa"
+SNAPP_GREEN = "#00C853"
+HEADER_BG = "#1e3a5f"
+HEADER_BG_LIGHT = "#D9E1F2"
+GROUP_HEADER_BG = "#4472C4"
+BODY_BG = "#f5f6fa"
 
 # Excel-matching color scale RGB tuples
-WHITE   = (255, 255, 255)
-GREEN   = (99,  190, 123)   # #63BE7B
-RED     = (248, 105, 107)   # #F8696B
-YELLOW  = (255, 235, 132)   # #FFEB84
-LT_WHT  = (252, 252, 255)   # #FCFCFF — near-white baseline
+WHITE = (255, 255, 255)
+GREEN = (99,  190, 123)   # #63BE7B
+RED = (248, 105, 107)   # #F8696B
+YELLOW = (255, 235, 132)   # #FFEB84
+LT_WHT = (252, 252, 255)   # #FCFCFF — near-white baseline
 
 # ── Tab group definitions (prefix → tab name) ────────────────────────────────
 TAB_GROUPS = [
@@ -49,7 +51,8 @@ TAB_GROUPS = [
     ("Support & NPS",      ["#CS_", "#Reco_", "#NavReco_"]),
     ("Referral & Reg",     ["#Refer_", "#Reg_", "#Income_", "#Decline_"]),
     ("Services",           ["#Carfix_", "#Garage_"]),
-    ("Operations",         ["#Demand_", "#Speed_", "#DistOrigin_", "#GPS_", "#Unpaid_"]),
+    ("Operations",         ["#Demand_", "#Speed_",
+     "#DistOrigin_", "#GPS_", "#Unpaid_"]),
 ]
 
 # Satisfaction sheets with fixed 1-5 red/yellow/green scale
@@ -122,7 +125,7 @@ def fmt(val, col, sheet_name):
         except (ValueError, TypeError):
             return str(val)
 
-    is_pct_col   = "Part%" in col or "GotMsg%" in col
+    is_pct_col = "Part%" in col or "GotMsg%" in col
     is_fixed_sat = any(sheet_name.startswith(p) for p in _SAT_FIXED)
 
     if is_fixed_sat and not is_pct_col:
@@ -160,7 +163,8 @@ def col_ranges(df, grp_headers=None):
         for prefix, _ in grp_headers:
             grp = [c for c in df.columns if c.startswith(prefix) and c in rng]
             if len(grp) >= 2:
-                all_v = pd.concat([pd.to_numeric(data[c], errors="coerce") for c in grp]).dropna()
+                all_v = pd.concat(
+                    [pd.to_numeric(data[c], errors="coerce") for c in grp]).dropna()
                 if len(all_v):
                     g_lo, g_hi = float(all_v.min()), float(all_v.max())
                     for c in grp:
@@ -216,7 +220,8 @@ def render_table(df, sheet_name, title):
 
     # Group header row
     if grp_headers:
-        out.append('<tr class="group-header-row"><th class="group-header empty-group" rowspan="2">City</th>')
+        out.append(
+            '<tr class="group-header-row"><th class="group-header empty-group" rowspan="2">City</th>')
         # Map each column to its group prefix+label (if any)
         col_group = {}  # col → (pfx, label)
         for pfx, label in grp_headers:
@@ -233,8 +238,10 @@ def render_table(df, sheet_name, title):
             else:
                 pfx, label = col_group[c]
                 if pfx not in emitted_groups:
-                    gcols = [c2 for c2 in df.columns if c2 in col_group and col_group[c2][0] == pfx]
-                    out.append(f'<th class="group-header" colspan="{len(gcols)}">{label}</th>')
+                    gcols = [
+                        c2 for c2 in df.columns if c2 in col_group and col_group[c2][0] == pfx]
+                    out.append(
+                        f'<th class="group-header" colspan="{len(gcols)}">{label}</th>')
                     emitted_groups.add(pfx)
         out.append("</tr>")
         # Sub-column headers
@@ -264,10 +271,12 @@ def render_table(df, sheet_name, title):
                 out.append('<td class="na-cell">-</td>')
                 continue
             lo, hi = ranges.get(col, (0, 1))
-            bg, tc = cell_color(val, col, sheet_name, lo, hi) if not is_total else (None, None)
+            bg, tc = cell_color(val, col, sheet_name, lo,
+                                hi) if not is_total else (None, None)
             text = fmt(val, col, sheet_name)
             if bg:
-                out.append(f'<td style="background:{css_rgb(bg)};color:{tc}">{text}</td>')
+                out.append(
+                    f'<td style="background:{css_rgb(bg)};color:{tc}">{text}</td>')
             else:
                 out.append(f'<td>{text}</td>')
         out.append("</tr>")
@@ -304,12 +313,16 @@ def collect_sheets(week=None):
             print(f"  [skip] {tag}: {e}")
             return {}
 
-    sh["#1_Snapp_Incentive_Amt"] = _s("#1",  sra.analysis_incentive_amounts_snapp, data, week)
-    sh["#2_Tapsi_Incentive_Amt"] = _s("#2",  sra.analysis_incentive_amounts_tapsi, data, week)
+    sh["#1_Snapp_Incentive_Amt"] = _s(
+        "#1",  sra.analysis_incentive_amounts_snapp, data, week)
+    sh["#2_Tapsi_Incentive_Amt"] = _s(
+        "#2",  sra.analysis_incentive_amounts_tapsi, data, week)
     for seg, df in _m("#3", sra.analysis_satisfaction_review, data, week).items():
         sh[f"#3_Sat_{seg[:20]}"] = df
-    sh["#4_Incentive_Duration"] = _s("#4",   sra.analysis_incentive_time_limitation, data, week)
-    sh["#5_6_IncType"]          = _s("#5_6", sra.analysis_received_incentive_types, data, week)
+    sh["#4_Incentive_Duration"] = _s(
+        "#4",   sra.analysis_incentive_time_limitation, data, week)
+    sh["#5_6_IncType"] = _s(
+        "#5_6", sra.analysis_received_incentive_types, data, week)
     try:
         d = sra.analysis_incentive_dissatisfaction(data, week)
         sh["#8_Dissat"] = d["combined"]
@@ -320,39 +333,43 @@ def collect_sheets(week=None):
     except Exception as e:
         print(f"  [skip] #8/#9 dissatisfaction: {e}")
 
-    sh["#12_Cities_Overview"]    = _s("#12",    sra.analysis_all_cities_overview, data, week)
-    sh["#13_RideShare"]          = _s("#13",    sra.analysis_ride_share, data, week)
+    sh["#12_Cities_Overview"] = _s(
+        "#12",    sra.analysis_all_cities_overview, data, week)
+    sh["#13_RideShare"] = _s("#13",    sra.analysis_ride_share, data, week)
     for label, df in _m("#14", sra.analysis_navigation_usage, data, week).items():
         sh[f"#14_Nav_{label[:20]}"] = df
     for label, df in _m("#15_Persona", sra.analysis_driver_persona, data, week).items():
         sh[f"#15_Persona_{label[:16]}"] = df
-    sh["#15_Persona_PartTime"]   = _s("#15_PT", sra.analysis_driver_persona_parttime_rides, data, week)
+    sh["#15_Persona_PartTime"] = _s(
+        "#15_PT", sra.analysis_driver_persona_parttime_rides, data, week)
     for label, df in _m("#16", sra.analysis_referral_plan, data, week).items():
         sh[f"#16_Ref_{label[:20]}"] = df
-    sh["#17_Inactivity"]         = _s("#17",    sra.analysis_inactivity_before_incentive, data, week)
+    sh["#17_Inactivity"] = _s(
+        "#17",    sra.analysis_inactivity_before_incentive, data, week)
     for label, df in _m("#18", sra.analysis_commission_free, data, week).items():
         sh[f"#18_CommFree_{label}"] = df
-    sh["#19_LuckyWheel"]         = _s("#19",    sra.analysis_lucky_wheel, data, week)
+    sh["#19_LuckyWheel"] = _s("#19",    sra.analysis_lucky_wheel, data, week)
     for label, df in _m("#20", sra.analysis_request_refusal, data, week).items():
-        sh[f"#20_Refusal_{label.replace(' ','_')[:20]}"] = df
+        sh[f"#20_Refusal_{label.replace(' ', '_')[:20]}"] = df
     for plat, df in _m("#CS_Sat",    sra.analysis_cs_satisfaction,     data, week).items():
         sh[f"#CS_Sat_{plat}"] = df
     for label, df in _m("#CS_Cat",   sra.analysis_cs_categories,       data, week).items():
-        sh[f"#CS_Cat_{label.replace(' ','_')[:18]}"] = df
+        sh[f"#CS_Cat_{label.replace(' ', '_')[:18]}"] = df
     for plat, df in _m("#CS_Reason", sra.analysis_cs_important_reason, data, week).items():
         sh[f"#CS_Reason_{plat}"] = df
     reco = _s("#Reco", sra.analysis_recommend, data, week)
     if isinstance(reco, pd.DataFrame) and not reco.empty:
         sh["#Reco_NPS"] = reco
     for label, df in _m("#Refer", sra.analysis_refer_others, data, week).items():
-        sh[f"#Refer_{label.replace(' ','_')[:18]}"] = df
-    nav_reco = _s("#NavReco", sra.analysis_navigation_recommendations, data, week)
+        sh[f"#Refer_{label.replace(' ', '_')[:18]}"] = df
+    nav_reco = _s(
+        "#NavReco", sra.analysis_navigation_recommendations, data, week)
     if isinstance(nav_reco, pd.DataFrame) and not nav_reco.empty:
         sh["#NavReco_Scores"] = nav_reco
     for label, df in _m("#Reg",    sra.analysis_registration,  data, week).items():
-        sh[f"#Reg_{label.replace(' ','_')[:18]}"] = df
+        sh[f"#Reg_{label.replace(' ', '_')[:18]}"] = df
     for label, df in _m("#Income", sra.analysis_better_income, data, week).items():
-        sh[f"#Income_{label.replace(' ','_')[:18]}"] = df
+        sh[f"#Income_{label.replace(' ', '_')[:18]}"] = df
     decline = _s("#Decline", sra.analysis_decline_reasons, data, week)
     if isinstance(decline, pd.DataFrame) and not decline.empty:
         sh["#Decline_Reasons"] = decline
@@ -369,9 +386,9 @@ def collect_sheets(week=None):
         if isinstance(v, pd.DataFrame) and not v.empty:
             sh[key] = v
     for label, df in _m("#GPS",    sra.analysis_gps,                 data, week).items():
-        sh[f"#GPS_{label.replace(' ','_')[:18]}"] = df
+        sh[f"#GPS_{label.replace(' ', '_')[:18]}"] = df
     for label, df in _m("#Unpaid", sra.analysis_unpaid_by_passenger, data, week).items():
-        sh[f"#Unpaid_{label.replace(' ','_')[:18]}"] = df
+        sh[f"#Unpaid_{label.replace(' ', '_')[:18]}"] = df
 
     # Drop all-NaN-column sheets / empty sheets (mirrors run_all cleanup)
     meta = {"n", "n_joint", "n_dissatisfied", "n_contacted"}
@@ -405,8 +422,8 @@ def prepare(df, sheet_name):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_html(sheets, week):
-    tab_panels   = []
-    tab_buttons  = []
+    tab_panels = []
+    tab_buttons = []
     all_assigned = set()
 
     for i, (tab_name, prefixes) in enumerate(TAB_GROUPS):
@@ -423,12 +440,12 @@ def build_html(sheets, week):
 
         cards = []
         for sheet_name, df in matching.items():
-            df    = prepare(df, sheet_name)
+            df = prepare(df, sheet_name)
             title = sheet_name.lstrip("#").replace("_", " ")
             cards.append(render_table(df, sheet_name, title))
 
         active = "active" if i == 0 else ""
-        disp   = "block"  if i == 0 else "none"
+        disp = "block" if i == 0 else "none"
         tab_buttons.append(
             f'<button class="tab-btn {active}" onclick="switchTab(event,\'tab-{i}\')">'
             f'{tab_name}</button>'
@@ -444,7 +461,7 @@ def build_html(sheets, week):
         idx = len(tab_buttons)
         cards = []
         for sheet_name, df in unassigned.items():
-            df    = prepare(df, sheet_name)
+            df = prepare(df, sheet_name)
             title = sheet_name.lstrip("#").replace("_", " ")
             cards.append(render_table(df, sheet_name, title))
         tab_buttons.append(
