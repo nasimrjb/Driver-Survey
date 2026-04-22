@@ -31,7 +31,9 @@ OUTPUT = r"D:\Work\Driver Survey\PowerBI\RoutineAnalysis_Dashboard.html"
 SNAPP_GREEN = "#00C853"
 HEADER_BG = "#1e3a5f"
 HEADER_BG_LIGHT = "#D9E1F2"
-GROUP_HEADER_BG = "#4472C4"
+GROUP_HEADER_BG        = "#4472C4"   # neutral (mixed) group headers — blue
+GROUP_HEADER_BG_SNAPP  = "#1E7A3C"   # Snapp group headers — dark green
+GROUP_HEADER_BG_TAPSI  = "#C0392B"   # Tapsi group headers — dark red
 BODY_BG = "#f5f6fa"
 
 # Excel-matching color scale RGB tuples
@@ -58,8 +60,52 @@ TAB_GROUPS = [
 # Satisfaction sheets with fixed 1-5 red/yellow/green scale
 _SAT_FIXED = {"#3_Sat_", "#CS_Sat_", "#Carfix_Sat_", "#Garage_Sat_"}
 
-# Dissatisfaction sheets: higher = worse (white → red)
-_DISSAT = {"#8_Dissat", "#9_Dissat"}
+# ── Platform-aware color routing ─────────────────────────────────────────────
+# Tapsi → red scale (#F8696B end),  Snapp → green scale (#63BE7B end).
+# These sheet prefixes override column-name detection for sheets whose columns
+# carry no explicit platform marker in their names.
+_TAPSI_SHEET_PREFIXES = (
+    "#2_Tapsi",             # Tapsi incentive amounts
+    "#17_Inactivity",       # Tapsi inactivity before incentive
+    "#18_CommFree_Tapsi",   # commission-free analysis — Tapsi sub-table
+    "#19_LuckyWheel",       # Tapsi lucky wheel
+    "#14_Nav_Navigation",   # navigation familiarity/installed/used (Tapsi long_rare)
+    "#Garage_",             # TapsiGarage satisfaction
+)
+_SNAPP_SHEET_PREFIXES = (
+    "#1_Snapp",             # Snapp incentive amounts
+    "#18_CommFree_Snapp",   # commission-free analysis — Snapp sub-table
+    "#Carfix_",             # SnappCarFix satisfaction
+)
+
+
+def _is_tapsi(col, sheet_name):
+    """Return True when a column should use the Tapsi (red) color scale.
+
+    Priority order:
+      1. Hard-coded sheet-prefix overrides (sheets with no platform marker in
+         column names).
+      2. Column-name contains 'tapsi' / 'snapp' (case-insensitive).
+      3. Sheet-name contains 'tapsi' / 'snapp'.
+      4. Default → Snapp (green).
+    """
+    for pfx in _TAPSI_SHEET_PREFIXES:
+        if sheet_name.startswith(pfx):
+            return True
+    for pfx in _SNAPP_SHEET_PREFIXES:
+        if sheet_name.startswith(pfx):
+            return False
+    cl = col.lower()
+    if "tapsi" in cl:
+        return True
+    if "snapp" in cl:
+        return False
+    sl = sheet_name.lower()
+    if "tapsi" in sl:
+        return True
+    if "snapp" in sl:
+        return False
+    return False   # default: Snapp / green
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -80,30 +126,34 @@ def lum(c):
 
 
 def cell_color(val, col, sheet_name, lo, hi):
-    """Return (bg_rgb, text_color_str) for a data cell, or (None, None)."""
+    """Return (bg_rgb, text_color_str) for a data cell, or (None, None).
+
+    Color scale end-points match the reference Excel exactly:
+      Snapp  → near-white (#FCFCFF) → green (#63BE7B)
+      Tapsi  → near-white (#FCFCFF) → red   (#F8696B)
+    Satisfaction sheets keep their own fixed 1-5 red→yellow→green scale.
+    """
     if pd.isna(val) or col in sra.NON_PCT_COLS or lo == hi:
         return None, None
 
     is_pct_col = "Part%" in col or "GotMsg%" in col
     is_fixed_sat = any(sheet_name.startswith(p) for p in _SAT_FIXED)
-    is_dissat = any(sheet_name.startswith(p) for p in _DISSAT)
 
     t = max(0.0, min(1.0, (val - lo) / (hi - lo))) if hi != lo else 0.0
 
     if is_fixed_sat and not is_pct_col:
-        # Fixed 1-5 scale: red→yellow→green
+        # Fixed 1-5 satisfaction scale: red → yellow → green
         if val <= 3:
             t2 = (val - 1) / 2 if val >= 1 else 0.0
             bg = lerp(RED, YELLOW, t2)
         else:
             t2 = (val - 3) / 2
             bg = lerp(YELLOW, GREEN, t2)
-    elif is_dissat:
-        bg = lerp(WHITE, RED, t)
     elif sheet_name.startswith("#12_Cities_Overview") and "Dual SU" in col:
+        # % Dual sign-up: higher means more Tapsi exposure → red
         bg = lerp(WHITE, RED, t)
-    elif sheet_name.startswith("#13_RideShare") and "Tapsi" in col and "@" in col:
-        bg = lerp(WHITE, RED, t)
+    elif _is_tapsi(col, sheet_name):
+        bg = lerp(LT_WHT, RED, t)
     else:
         bg = lerp(LT_WHT, GREEN, t)
 
@@ -179,6 +229,34 @@ def col_ranges(df, grp_headers=None):
 _COL_RENAME = {"E_n": "#Resp", "F_n": "#Joint", "G_n": "#Cmpt"}
 
 
+def _group_header_bg(pfx, sheet_name):
+    """Return the CSS hex color for one group-header cell.
+
+    Priority:
+      1. Group prefix itself contains 'tapsi'/'snapp' (e.g. "Tapsi_", "Snapp_").
+      2. Whole-sheet override via _TAPSI_SHEET_PREFIXES / _SNAPP_SHEET_PREFIXES.
+      3. Sheet name contains 'tapsi'/'snapp'.
+      4. Fall back to neutral blue.
+    """
+    pl = pfx.lower()
+    if "tapsi" in pl:
+        return GROUP_HEADER_BG_TAPSI
+    if "snapp" in pl:
+        return GROUP_HEADER_BG_SNAPP
+    for p in _TAPSI_SHEET_PREFIXES:
+        if sheet_name.startswith(p):
+            return GROUP_HEADER_BG_TAPSI
+    for p in _SNAPP_SHEET_PREFIXES:
+        if sheet_name.startswith(p):
+            return GROUP_HEADER_BG_SNAPP
+    sl = sheet_name.lower()
+    if "tapsi" in sl:
+        return GROUP_HEADER_BG_TAPSI
+    if "snapp" in sl:
+        return GROUP_HEADER_BG_SNAPP
+    return GROUP_HEADER_BG   # neutral blue
+
+
 def render_table(df, sheet_name, title):
     """Render a single DataFrame as a color-coded HTML table block."""
     if df is None or df.empty:
@@ -213,8 +291,25 @@ def render_table(df, sheet_name, title):
             return "Last"
         return _COL_RENAME.get(col, col)
 
+    # Platform badge in sheet title (whole-sheet platform only)
+    _badge = ""
+    _all_tapsi = any(sheet_name.startswith(p) for p in _TAPSI_SHEET_PREFIXES)
+    _all_snapp = any(sheet_name.startswith(p) for p in _SNAPP_SHEET_PREFIXES)
+    if not _all_tapsi and not _all_snapp:
+        sl = sheet_name.lower()
+        _all_tapsi = "tapsi" in sl and "snapp" not in sl
+        _all_snapp = "snapp" in sl and "tapsi" not in sl
+    if _all_tapsi:
+        _badge = (f' <span style="background:{GROUP_HEADER_BG_TAPSI};color:white;'
+                  f'font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;'
+                  f'vertical-align:middle">Tapsi</span>')
+    elif _all_snapp:
+        _badge = (f' <span style="background:{GROUP_HEADER_BG_SNAPP};color:white;'
+                  f'font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;'
+                  f'vertical-align:middle">Snapp</span>')
+
     out = [f'<div class="table-wrapper">'
-           f'<h3 class="sheet-title">{title}</h3>'
+           f'<h3 class="sheet-title">{title}{_badge}</h3>'
            f'<div class="table-scroll"><table class="heatmap-table">']
     out.append("<thead>")
 
@@ -240,8 +335,10 @@ def render_table(df, sheet_name, title):
                 if pfx not in emitted_groups:
                     gcols = [
                         c2 for c2 in df.columns if c2 in col_group and col_group[c2][0] == pfx]
+                    bg = _group_header_bg(pfx, sheet_name)
                     out.append(
-                        f'<th class="group-header" colspan="{len(gcols)}">{label}</th>')
+                        f'<th class="group-header" colspan="{len(gcols)}"'
+                        f' style="background:{bg};border-color:{bg}">{label}</th>')
                     emitted_groups.add(pfx)
         out.append("</tr>")
         # Sub-column headers
@@ -601,6 +698,9 @@ body {{
     background: {GROUP_HEADER_BG};
     border-color: #3a6bb5;
 }}
+/* Per-platform group header overrides (set via inline style in render_table) */
+.group-header[style*="{GROUP_HEADER_BG_TAPSI}"] {{ border-color: #922b21 !important; }}
+.group-header[style*="{GROUP_HEADER_BG_SNAPP}"] {{ border-color: #145a32 !important; }}
 .empty-group {{ background: #e0e6f0; }}
 .col-header-row {{ background: {HEADER_BG_LIGHT}; }}
 .col-header {{
