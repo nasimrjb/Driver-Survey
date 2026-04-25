@@ -21,26 +21,8 @@ SELECT
     TRY_CAST(m.[datetime] AS DATETIME) AS response_datetime,
     m.[_source_file],
     TRY_CAST(m.weeknumber AS INT) AS weeknumber,
-    -- yearweek: e.g. 2501 for week 1 of 2025 (ISO 8601 year + week)
-    -- Uses the stored weeknumber (now ISO week) and the ISO year which
-    -- handles year-boundary correctly (e.g. Dec 31 may be ISO week 1 of next year).
-    CASE WHEN TRY_CAST(m.[datetime] AS DATETIME) IS NOT NULL
-              AND TRY_CAST(m.weeknumber AS INT) IS NOT NULL
-         THEN CASE
-              -- If ISO week >= 52 but month is January, the ISO year is previous year
-              WHEN TRY_CAST(m.weeknumber AS INT) >= 52
-                   AND MONTH(TRY_CAST(m.[datetime] AS DATETIME)) = 1
-              THEN ((YEAR(TRY_CAST(m.[datetime] AS DATETIME)) - 1) % 100) * 100
-                   + TRY_CAST(m.weeknumber AS INT)
-              -- If ISO week = 1 but month is December, the ISO year is next year
-              WHEN TRY_CAST(m.weeknumber AS INT) = 1
-                   AND MONTH(TRY_CAST(m.[datetime] AS DATETIME)) = 12
-              THEN ((YEAR(TRY_CAST(m.[datetime] AS DATETIME)) + 1) % 100) * 100
-                   + TRY_CAST(m.weeknumber AS INT)
-              ELSE (YEAR(TRY_CAST(m.[datetime] AS DATETIME)) % 100) * 100
-                   + TRY_CAST(m.weeknumber AS INT)
-              END
-         ELSE NULL END AS yearweek,
+    CAST(m.yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(m.yearweek%100 AS VARCHAR), 2) AS yearweek,
+    m.yearweek AS yearweek_sort,
     -- driver_type
     CASE WHEN TRY_CAST(m.tapsi_ride AS FLOAT) = 0 OR m.tapsi_ride IS NULL OR m.tapsi_ride = ''
          THEN 'Snapp Exclusive' ELSE 'Joint' END AS driver_type,
@@ -164,8 +146,8 @@ IF OBJECT_ID(N'Cab.vw_WeeklySatisfaction', N'V') IS NOT NULL DROP VIEW Cab.vw_We
 GO
 CREATE VIEW Cab.vw_WeeklySatisfaction AS
 SELECT
-    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-    yearweek AS yearweek_sort,
+    yearweek,
+    yearweek_sort,
     COUNT(*) AS response_count,
     -- Snapp satisfaction
     AVG(CAST(snapp_fare_satisfaction AS FLOAT)) AS snapp_fare_sat_avg,
@@ -193,7 +175,7 @@ SELECT
     SUM(CASE WHEN cooperation_type = 'Full-Time' THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS fulltime_pct
 FROM Cab.vw_ShortBase
 WHERE yearweek IS NOT NULL
-GROUP BY yearweek
+GROUP BY yearweek, yearweek_sort
 HAVING COUNT(*) >= 100
 ;
 GO
@@ -206,8 +188,8 @@ IF OBJECT_ID(N'Cab.vw_WeeklyNPS', N'V') IS NOT NULL DROP VIEW Cab.vw_WeeklyNPS;
 GO
 CREATE VIEW Cab.vw_WeeklyNPS AS
 SELECT
-    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-    yearweek AS yearweek_sort,
+    yearweek,
+    yearweek_sort,
     -- Snapp NPS
     COUNT(snapp_recommend) AS snapp_nps_n,
     SUM(CASE WHEN snapp_recommend >= 9 THEN 1 ELSE 0 END) * 100.0
@@ -232,7 +214,7 @@ SELECT
      * 100.0 / NULLIF(COUNT(tapsi_recommend), 0) AS tapsi_nps
 FROM Cab.vw_ShortBase
 WHERE yearweek IS NOT NULL
-GROUP BY yearweek
+GROUP BY yearweek, yearweek_sort
 HAVING COUNT(*) >= 100
 ;
 GO
@@ -294,8 +276,8 @@ GO
 CREATE VIEW Cab.vw_SatisfactionByCityWeek AS
 SELECT
     city,
-    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-    yearweek AS yearweek_sort,
+    yearweek,
+    yearweek_sort,
     COUNT(*) AS n,
     AVG(CAST(snapp_fare_satisfaction AS FLOAT)) AS snapp_fare_sat,
     AVG(CAST(snapp_income_satisfaction AS FLOAT)) AS snapp_income_sat,
@@ -308,7 +290,7 @@ SELECT
     AVG(CAST(active_joint AS FLOAT)) * 100 AS joint_pct
 FROM Cab.vw_ShortBase
 WHERE city IS NOT NULL AND city != '' AND yearweek IS NOT NULL
-GROUP BY city, yearweek
+GROUP BY city, yearweek, yearweek_sort
 HAVING COUNT(*) >= 10
 ;
 GO
@@ -471,8 +453,8 @@ IF OBJECT_ID(N'Cab.vw_IncentiveByWeek', N'V') IS NOT NULL DROP VIEW Cab.vw_Incen
 GO
 CREATE VIEW Cab.vw_IncentiveByWeek AS
 SELECT
-    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-    yearweek AS yearweek_sort,
+    yearweek,
+    yearweek_sort,
     COUNT(*) AS n,
     -- Incentive amounts
     AVG(snapp_incentive) AS snapp_incentive_avg,
@@ -499,7 +481,7 @@ SELECT
     AVG(wheel) AS wheel_avg
 FROM Cab.vw_ShortBase
 WHERE yearweek IS NOT NULL
-GROUP BY yearweek
+GROUP BY yearweek, yearweek_sort
 HAVING COUNT(*) >= 100
 ;
 GO
@@ -548,8 +530,8 @@ GO
 CREATE VIEW Cab.vw_RideShareByCityWeek AS
 SELECT
     city,
-    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-    yearweek AS yearweek_sort,
+    yearweek,
+    yearweek_sort,
     COUNT(*) AS total_respondents,
     SUM(CAST(active_joint AS INT)) AS joint_respondents,
     SUM(CASE WHEN active_joint = 0 THEN 1 ELSE 0 END) AS exclusive_respondents,
@@ -569,7 +551,7 @@ SELECT
          ELSE NULL END AS tapsi_ride_share_pct
 FROM Cab.vw_ShortBase
 WHERE city IS NOT NULL AND city != '' AND yearweek IS NOT NULL
-GROUP BY city, yearweek
+GROUP BY city, yearweek, yearweek_sort
 ;
 GO
 
@@ -640,15 +622,15 @@ IF OBJECT_ID(N'Cab.vw_NavigationByWeek', N'V') IS NOT NULL DROP VIEW Cab.vw_Navi
 GO
 CREATE VIEW Cab.vw_NavigationByWeek AS
 SELECT
-    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-    yearweek AS yearweek_sort,
+    yearweek,
+    yearweek_sort,
     snapp_last_trip_navigation AS nav_app,
     COUNT(*) AS n,
     COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (PARTITION BY yearweek) AS pct
 FROM Cab.vw_ShortBase
 WHERE snapp_last_trip_navigation IS NOT NULL AND snapp_last_trip_navigation != ''
       AND yearweek IS NOT NULL
-GROUP BY yearweek, snapp_last_trip_navigation
+GROUP BY yearweek, yearweek_sort, snapp_last_trip_navigation
 ;
 GO
 
