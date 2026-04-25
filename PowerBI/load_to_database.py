@@ -418,6 +418,38 @@ def main():
         # Insert new data
         conn = insert_data(conn, df_new, col_types, table_name)
 
+        # Compute yearweek for newly inserted rows that don't have it yet.
+        # Priority:
+        #   1. _source_file matches 'Data Raw Driver NNNN.xlsx' → 4-digit yearweek at chars 17-20
+        #   2. ISO week of [datetime] column → CAST(RIGHT(YEAR(dt)*100+ISO_WK,4) …) via a formula
+        #   3. Fallback: 2500 + weeknumber
+        if table_name in ("DriverSurvey_ShortMain", "DriverSurvey_ShortRare",
+                          "DriverSurvey_WideMain", "DriverSurvey_WideRare",
+                          "DriverSurvey_LongMain", "DriverSurvey_LongRare"):
+            print(f"  Computing yearweek for new rows...")
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                UPDATE [{SCHEMA}].[{table_name}]
+                SET [yearweek] =
+                    CASE
+                        -- Pattern: 'Data Raw Driver NNNN.xlsx'  (new-format files from 2026 onward)
+                        WHEN [_source_file] LIKE 'Data Raw Driver [0-9][0-9][0-9][0-9].xlsx'
+                            THEN CAST(SUBSTRING([_source_file], 17, 4) AS INT)
+                        -- Datetime-based ISO yearweek (handles year boundaries correctly)
+                        WHEN TRY_CAST([datetime] AS DATETIME) IS NOT NULL
+                            THEN (
+                                YEAR(DATEADD(dd, 26 - DATEPART(iso_week, TRY_CAST([datetime] AS DATETIME)), TRY_CAST([datetime] AS DATETIME))) % 100
+                            ) * 100 + DATEPART(iso_week, TRY_CAST([datetime] AS DATETIME))
+                        -- Fallback: assume 2025
+                        ELSE 2500 + TRY_CAST([weeknumber] AS INT)
+                    END
+                WHERE [yearweek] IS NULL
+            """)
+            rows_updated = cursor.rowcount
+            conn.commit()
+            cursor.close()
+            print(f"  yearweek computed for {rows_updated:,} rows.")
+
         # Verify final count
         cursor = conn.cursor()
         cursor.execute(f"SELECT COUNT(*) FROM [{SCHEMA}].[{table_name}]")

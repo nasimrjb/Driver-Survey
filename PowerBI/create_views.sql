@@ -930,7 +930,7 @@ CREATE OR ALTER VIEW [Cab].[vw_RA_SatReview] AS
 --                     cooperation_type = 'Full-Time'   for the Full-Time page.
 WITH base AS (
     SELECT
-        weeknumber, city, cooperation_type,
+        yearweek, weeknumber, city, cooperation_type,
         TRY_CAST(active_joint AS INT) AS is_joint,
         snapp_gotmessage_text_incentive,
         tapsi_gotmessage_text_incentive,
@@ -949,6 +949,8 @@ WITH base AS (
 ),
 agg AS (
     SELECT
+        CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
         weeknumber, city, cooperation_type,
         COUNT(*) AS n,
         SUM(CASE WHEN is_joint = 1 THEN 1 ELSE 0 END) AS n_joint,
@@ -994,12 +996,14 @@ agg AS (
         AVG(CASE WHEN is_joint=1 THEN snapp_income_sat ELSE NULL END) AS Income_Sat_Jnt_Snapp,
         AVG(CASE WHEN is_joint=1 THEN tapsi_income_sat ELSE NULL END) AS Income_Sat_Jnt_Tapsi
     FROM base
-    GROUP BY weeknumber, city, cooperation_type
+    GROUP BY yearweek, weeknumber, city, cooperation_type
 ),
 all_drv AS (
     -- "All Drivers" synthetic row: same formulas, no cooperation_type filter.
     -- Matches Python's lambda d: d  (no segment filter on the week slice).
     SELECT
+        CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
         weeknumber, city, 'All Drivers' AS cooperation_type,
         COUNT(*) AS n,
         SUM(CASE WHEN is_joint = 1 THEN 1 ELSE 0 END) AS n_joint,
@@ -1039,7 +1043,7 @@ all_drv AS (
         AVG(CASE WHEN is_joint=1 THEN snapp_income_sat ELSE NULL END) AS Income_Sat_Jnt_Snapp,
         AVG(CASE WHEN is_joint=1 THEN tapsi_income_sat ELSE NULL END) AS Income_Sat_Jnt_Tapsi
     FROM base
-    GROUP BY weeknumber, city
+    GROUP BY yearweek, weeknumber, city
 )
 SELECT * FROM agg
 UNION ALL
@@ -1053,7 +1057,7 @@ GO
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_CitiesOverview] AS
 WITH src AS (
-    SELECT weeknumber, city,
+    SELECT yearweek, weeknumber, city,
         TRY_CAST(active_joint AS INT)    AS is_joint,
         TRY_CAST(snapp_LOC   AS FLOAT)   AS snapp_loc_f,
         TRY_CAST(tapsi_LOC   AS FLOAT)   AS tapsi_loc_f,
@@ -1063,6 +1067,8 @@ WITH src AS (
     WHERE city IS NOT NULL
 )
 SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
     weeknumber, city,
     COUNT(*) AS E_n,
     SUM(CASE WHEN is_joint = 1 THEN 1 ELSE 0 END) AS F_n,
@@ -1089,7 +1095,7 @@ SELECT
         / NULLIF(SUM(CASE WHEN tapsi_loc_f > 0 THEN 1.0 ELSE 0.0 END),0)
         AS GotMsg_Joint_Cmpt_SU
 FROM src
-GROUP BY weeknumber, city;
+GROUP BY yearweek, weeknumber, city;
 GO
 
 
@@ -1099,7 +1105,7 @@ GO
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_RideShare] AS
 WITH src AS (
-    SELECT weeknumber, city,
+    SELECT yearweek, weeknumber, city,
         TRY_CAST(active_joint AS INT)  AS is_joint,
         TRY_CAST(snapp_ride   AS FLOAT) AS snapp_f,
         TRY_CAST(tapsi_ride   AS FLOAT) AS tapsi_f
@@ -1107,6 +1113,8 @@ WITH src AS (
     WHERE city IS NOT NULL
 )
 SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
     weeknumber, city,
     COUNT(*) AS total_Res,
     SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS Joint_Res,
@@ -1125,7 +1133,7 @@ SELECT
     100.0 * ISNULL(SUM(CASE WHEN is_joint=1 THEN tapsi_f ELSE 0 END),0)
         / NULLIF(ISNULL(SUM(snapp_f),0)+ISNULL(SUM(tapsi_f),0),0) AS Jnt_at_Tapsi_pct
 FROM src
-GROUP BY weeknumber, city;
+GROUP BY yearweek, weeknumber, city;
 GO
 
 
@@ -1135,7 +1143,7 @@ GO
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_PersonaPartTime] AS
 WITH src AS (
-    SELECT weeknumber, city, cooperation_type,
+    SELECT yearweek, weeknumber, city, cooperation_type,
         TRY_CAST(active_joint AS INT)  AS is_joint,
         TRY_CAST(snapp_ride   AS FLOAT) AS snapp_f,
         TRY_CAST(tapsi_ride   AS FLOAT) AS tapsi_f
@@ -1143,6 +1151,8 @@ WITH src AS (
     WHERE city IS NOT NULL
 )
 SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
     weeknumber, city,
     COUNT(*) AS total_Res,
     SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS Joint_Res,
@@ -1157,7 +1167,7 @@ SELECT
         / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS RidePerBoarded_Tapsi,
     ISNULL(SUM(snapp_f),0) / NULLIF(COUNT(*),0) AS AvgAllRides
 FROM src
-GROUP BY weeknumber, city;
+GROUP BY yearweek, weeknumber, city;
 GO
 
 
@@ -1168,25 +1178,29 @@ GO
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_IncentiveAmounts] AS
 SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
     weeknumber, city, 'Snapp' AS platform,
     snapp_incentive_rial_details AS incentive_range,
     COUNT(*) AS n_range,
-    SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total,
-    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city),0) AS pct
+    SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total,
+    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY yearweek, city),0) AS pct
 FROM [Cab].[DriverSurvey_ShortMain]
 WHERE city IS NOT NULL AND snapp_incentive_rial_details IS NOT NULL
-GROUP BY weeknumber, city, snapp_incentive_rial_details
+GROUP BY yearweek, weeknumber, city, snapp_incentive_rial_details
 UNION ALL
 SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
     weeknumber, city, 'Tapsi' AS platform,
     tapsi_incentive_rial_details AS incentive_range,
     COUNT(*) AS n_range,
-    SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total,
-    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city),0) AS pct
+    SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total,
+    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY yearweek, city),0) AS pct
 FROM [Cab].[DriverSurvey_ShortMain]
 WHERE city IS NOT NULL AND tapsi_incentive_rial_details IS NOT NULL
   AND TRY_CAST(active_joint AS INT) = 1
-GROUP BY weeknumber, city, tapsi_incentive_rial_details;
+GROUP BY yearweek, weeknumber, city, tapsi_incentive_rial_details;
 GO
 
 
@@ -1196,23 +1210,27 @@ GO
 -- Matrix: city = rows, duration_bucket = columns, pct = values
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_IncentiveDuration] AS
-SELECT weeknumber, city, 'Snapp' AS platform,
+SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
+    weeknumber, city, 'Snapp' AS platform,
     snapp_incentive_active_duration AS duration_bucket,
     COUNT(*) AS n_range,
-    SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total,
-    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city),0) AS pct
+    SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total,
+    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY yearweek, city),0) AS pct
 FROM [Cab].[DriverSurvey_ShortMain]
 WHERE city IS NOT NULL AND snapp_incentive_active_duration IS NOT NULL
-GROUP BY weeknumber, city, snapp_incentive_active_duration
+GROUP BY yearweek, weeknumber, city, snapp_incentive_active_duration
 UNION ALL
-SELECT weeknumber, city, 'Tapsi' AS platform,
+SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
+    weeknumber, city, 'Tapsi' AS platform,
     tapsi_incentive_active_duration AS duration_bucket,
     COUNT(*) AS n_range,
-    SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total,
-    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city),0) AS pct
+    SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total,
+    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY yearweek, city),0) AS pct
 FROM [Cab].[DriverSurvey_ShortMain]
 WHERE city IS NOT NULL AND tapsi_incentive_active_duration IS NOT NULL
-GROUP BY weeknumber, city, tapsi_incentive_active_duration;
+GROUP BY yearweek, weeknumber, city, tapsi_incentive_active_duration;
 GO
 
 
@@ -1225,47 +1243,59 @@ GO
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_Persona] AS
 WITH activity AS (
-    SELECT weeknumber, city, 'Activity Type' AS dimension,
+    SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
+        weeknumber, city, 'Activity Type' AS dimension,
         CAST(active_time AS NVARCHAR(100)) AS category,
-        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND active_time IS NOT NULL
-    GROUP BY weeknumber, city, active_time),
+    GROUP BY yearweek, weeknumber, city, active_time),
 age_grp AS (
-    SELECT weeknumber, city, 'Age Group' AS dimension,
+    SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
+        weeknumber, city, 'Age Group' AS dimension,
         CAST(age_group AS NVARCHAR(100)) AS category,
-        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND age_group IS NOT NULL
-    GROUP BY weeknumber, city, age_group),
+    GROUP BY yearweek, weeknumber, city, age_group),
 edu AS (
-    SELECT weeknumber, city, 'Education' AS dimension,
+    SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
+        weeknumber, city, 'Education' AS dimension,
         CAST(edu AS NVARCHAR(100)) AS category,
-        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND edu IS NOT NULL
-    GROUP BY weeknumber, city, edu),
+    GROUP BY yearweek, weeknumber, city, edu),
 marr AS (
-    SELECT weeknumber, city, 'Marital Status' AS dimension,
+    SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
+        weeknumber, city, 'Marital Status' AS dimension,
         CAST(marr_stat AS NVARCHAR(100)) AS category,
-        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND marr_stat IS NOT NULL
-    GROUP BY weeknumber, city, marr_stat),
+    GROUP BY yearweek, weeknumber, city, marr_stat),
 gen AS (
-    SELECT weeknumber, city, 'Gender' AS dimension,
+    SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
+        weeknumber, city, 'Gender' AS dimension,
         CAST(gender AS NVARCHAR(100)) AS category,
-        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND gender IS NOT NULL
-    GROUP BY weeknumber, city, gender),
+    GROUP BY yearweek, weeknumber, city, gender),
 coop AS (
-    SELECT weeknumber, city, 'Cooperation Type' AS dimension,
+    SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
+        weeknumber, city, 'Cooperation Type' AS dimension,
         CAST(cooperation_type AS NVARCHAR(100)) AS category,
-        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY weeknumber, city) AS n_total
+        COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND cooperation_type IS NOT NULL
-    GROUP BY weeknumber, city, cooperation_type)
+    GROUP BY yearweek, weeknumber, city, cooperation_type)
 SELECT *, 100.0 * n / NULLIF(n_total,0) AS pct FROM activity
 UNION ALL SELECT *, 100.0 * n / NULLIF(n_total,0) AS pct FROM age_grp
 UNION ALL SELECT *, 100.0 * n / NULLIF(n_total,0) AS pct FROM edu
@@ -1281,7 +1311,7 @@ GO
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_CommFree] AS
 WITH src AS (
-    SELECT weeknumber, city,
+    SELECT yearweek, weeknumber, city,
         TRY_CAST(active_joint  AS INT)   AS is_joint,
         TRY_CAST(snapp_commfree AS FLOAT) AS snapp_cf,
         TRY_CAST(tapsi_commfree AS FLOAT) AS tapsi_cf,
@@ -1294,7 +1324,9 @@ WITH src AS (
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL
 )
-SELECT weeknumber, city, 'Snapp' AS platform,
+SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
+    weeknumber, city, 'Snapp' AS platform,
     COUNT(*) AS n,
     SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END) AS Who_Got_Message,
     SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_inc_cat='Money' THEN 1 ELSE 0 END) AS GotMsg_Money,
@@ -1306,9 +1338,11 @@ SELECT weeknumber, city, 'Snapp' AS platform,
     100.0 * SUM(CASE WHEN snapp_cf > 0 THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*),0)
         AS pct_Free_Comm_Ride
 FROM src
-GROUP BY weeknumber, city
+GROUP BY yearweek, weeknumber, city
 UNION ALL
-SELECT weeknumber, city, 'Tapsi' AS platform,
+SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort,
+    weeknumber, city, 'Tapsi' AS platform,
     SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS n,
     SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END) AS Who_Got_Message,
     SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_inc_cat='Money' THEN 1 ELSE 0 END) AS GotMsg_Money,
@@ -1320,7 +1354,7 @@ SELECT weeknumber, city, 'Tapsi' AS platform,
     100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_cf > 0 THEN 1.0 ELSE 0.0 END)
         / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS pct_Free_Comm_Ride
 FROM src
-GROUP BY weeknumber, city;
+GROUP BY yearweek, weeknumber, city;
 GO
 
 
@@ -1330,6 +1364,8 @@ GO
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_CSRare] AS
 SELECT
+    CAST(sm.yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(sm.yearweek%100 AS VARCHAR), 2) AS yearweek,
+    sm.yearweek AS yearweek_sort,
     sm.weeknumber, sm.city,
     COUNT(*) AS n,
     AVG(TRY_CAST(sr.snapp_CS_satisfaction_overall   AS FLOAT)) AS Snapp_CS_Overall,
@@ -1347,7 +1383,7 @@ SELECT
 FROM [Cab].[DriverSurvey_ShortRare]  sr
 JOIN [Cab].[DriverSurvey_ShortMain]  sm ON sm.recordID = sr.recordID
 WHERE sm.city IS NOT NULL
-GROUP BY sm.weeknumber, sm.city;
+GROUP BY sm.yearweek, sm.weeknumber, sm.city;
 GO
 
 
@@ -1357,6 +1393,8 @@ GO
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_NavReco] AS
 SELECT
+    CAST(sm.yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(sm.yearweek%100 AS VARCHAR), 2) AS yearweek,
+    sm.yearweek AS yearweek_sort,
     sm.weeknumber, sm.city,
     COUNT(*) AS n,
     AVG(TRY_CAST(sr.snapp_recommend               AS FLOAT)) AS Snapp_NPS,
@@ -1371,7 +1409,7 @@ SELECT
 FROM [Cab].[DriverSurvey_ShortRare]  sr
 JOIN [Cab].[DriverSurvey_ShortMain]  sm ON sm.recordID = sr.recordID
 WHERE sm.city IS NOT NULL
-GROUP BY sm.weeknumber, sm.city;
+GROUP BY sm.yearweek, sm.weeknumber, sm.city;
 GO
 
 
