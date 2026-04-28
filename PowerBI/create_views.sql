@@ -1159,30 +1159,62 @@ GO
 -- Matrix: city = rows, incentive_range = columns, pct = values
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_IncentiveAmounts] AS
+WITH raw AS (
+    SELECT yearweek, weeknumber, city, 'Snapp' AS platform,
+        snapp_incentive_rial_details AS incentive_range,
+        COUNT(*) AS n_range,
+        SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL AND snapp_incentive_rial_details IS NOT NULL
+    GROUP BY yearweek, weeknumber, city, snapp_incentive_rial_details
+    UNION ALL
+    SELECT yearweek, weeknumber, city, 'Tapsi' AS platform,
+        tapsi_incentive_rial_details AS incentive_range,
+        COUNT(*) AS n_range,
+        SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL AND tapsi_incentive_rial_details IS NOT NULL
+      AND TRY_CAST(active_joint AS INT) = 1
+    GROUP BY yearweek, weeknumber, city, tapsi_incentive_rial_details
+)
 SELECT
     CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-        yearweek AS yearweek_sort,
-    weeknumber, city, 'Snapp' AS platform,
-    snapp_incentive_rial_details AS incentive_range,
-    COUNT(*) AS n_range,
-    SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total,
-    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY yearweek, city),0) AS pct
-FROM [Cab].[DriverSurvey_ShortMain]
-WHERE city IS NOT NULL AND snapp_incentive_rial_details IS NOT NULL
-GROUP BY yearweek, weeknumber, city, snapp_incentive_rial_details
-UNION ALL
-SELECT
-    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-        yearweek AS yearweek_sort,
-    weeknumber, city, 'Tapsi' AS platform,
-    tapsi_incentive_rial_details AS incentive_range,
-    COUNT(*) AS n_range,
-    SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total,
-    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY yearweek, city),0) AS pct
-FROM [Cab].[DriverSurvey_ShortMain]
-WHERE city IS NOT NULL AND tapsi_incentive_rial_details IS NOT NULL
-  AND TRY_CAST(active_joint AS INT) = 1
-GROUP BY yearweek, weeknumber, city, tapsi_incentive_rial_details;
+    yearweek AS yearweek_sort,
+    weeknumber, city, platform, incentive_range,
+    CASE incentive_range
+        WHEN '<20k'       THEN 1
+        WHEN '20_40k'     THEN 2
+        WHEN '40_60k'     THEN 3
+        WHEN '<50k'       THEN 4
+        WHEN '50_100k'    THEN 5
+        WHEN '50_200k'    THEN 6
+        WHEN '50_250k'    THEN 7
+        WHEN '60_80k'     THEN 8
+        WHEN '80_100k'    THEN 9
+        WHEN '< 100k'     THEN 10
+        WHEN '100_150k'   THEN 11
+        WHEN '100_200k'   THEN 12
+        WHEN '100_250k'   THEN 13
+        WHEN '150_200k'   THEN 14
+        WHEN '200_300k'   THEN 15
+        WHEN '200_400k'   THEN 16
+        WHEN '250_500k'   THEN 17
+        WHEN '300_500k'   THEN 18
+        WHEN '400_600k'   THEN 19
+        WHEN '500_750k'   THEN 20
+        WHEN '>500k'      THEN 21
+        WHEN '600_800k'   THEN 22
+        WHEN '750k_1m'    THEN 23
+        WHEN '800k_1m'    THEN 24
+        WHEN '1m_1.25m'   THEN 25
+        WHEN '>1m'        THEN 26
+        WHEN '1.25m_1.5m' THEN 27
+        WHEN '>1.5m'      THEN 28
+        ELSE 99
+    END AS incentive_range_sort,
+    n_range, n_total,
+    100.0 * n_range / NULLIF(n_total, 0) AS pct
+FROM raw;
 GO
 
 
@@ -1192,27 +1224,38 @@ GO
 -- Matrix: city = rows, duration_bucket = columns, pct = values
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_IncentiveDuration] AS
-SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-        yearweek AS yearweek_sort,
-    weeknumber, city, 'Snapp' AS platform,
-    snapp_incentive_active_duration AS duration_bucket,
-    COUNT(*) AS n_range,
-    SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total,
-    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY yearweek, city),0) AS pct
-FROM [Cab].[DriverSurvey_ShortMain]
-WHERE city IS NOT NULL AND snapp_incentive_active_duration IS NOT NULL
-GROUP BY yearweek, weeknumber, city, snapp_incentive_active_duration
-UNION ALL
-SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-        yearweek AS yearweek_sort,
-    weeknumber, city, 'Tapsi' AS platform,
-    tapsi_incentive_active_duration AS duration_bucket,
-    COUNT(*) AS n_range,
-    SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total,
-    100.0 * COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY yearweek, city),0) AS pct
-FROM [Cab].[DriverSurvey_ShortMain]
-WHERE city IS NOT NULL AND tapsi_incentive_active_duration IS NOT NULL
-GROUP BY yearweek, weeknumber, city, tapsi_incentive_active_duration;
+WITH raw AS (
+    SELECT yearweek, weeknumber, city, 'Snapp' AS platform,
+        snapp_incentive_active_duration AS duration_bucket,
+        COUNT(*) AS n_range,
+        SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL AND snapp_incentive_active_duration IS NOT NULL
+    GROUP BY yearweek, weeknumber, city, snapp_incentive_active_duration
+    UNION ALL
+    SELECT yearweek, weeknumber, city, 'Tapsi' AS platform,
+        tapsi_incentive_active_duration AS duration_bucket,
+        COUNT(*) AS n_range,
+        SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL AND tapsi_incentive_active_duration IS NOT NULL
+    GROUP BY yearweek, weeknumber, city, tapsi_incentive_active_duration
+)
+SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+    yearweek AS yearweek_sort,
+    weeknumber, city, platform, duration_bucket,
+    CASE duration_bucket
+        WHEN 'Few Hours' THEN 1
+        WHEN '1 Day'     THEN 2
+        WHEN '1_6 Days'  THEN 3
+        WHEN '7 Days'    THEN 4
+        WHEN '>7 Days'   THEN 5
+        ELSE 99
+    END AS duration_bucket_sort,
+    n_range, n_total,
+    100.0 * n_range / NULLIF(n_total, 0) AS pct
+FROM raw;
 GO
 
 
@@ -1229,6 +1272,16 @@ WITH activity AS (
         yearweek AS yearweek_sort,
         weeknumber, city, 'Activity Type' AS dimension,
         CAST(active_time AS NVARCHAR(100)) AS category,
+        CASE active_time
+            WHEN 'few hours/month' THEN 1
+            WHEN '<20hour/mo'      THEN 2
+            WHEN '5_20hour/week'   THEN 3
+            WHEN '20_40h/week'     THEN 4
+            WHEN '>40h/week'       THEN 5
+            WHEN '8_12hour/day'    THEN 6
+            WHEN '>12h/day'        THEN 7
+            ELSE 99
+        END AS category_sort,
         COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND active_time IS NOT NULL
@@ -1238,6 +1291,11 @@ age_grp AS (
         yearweek AS yearweek_sort,
         weeknumber, city, 'Age Group' AS dimension,
         CAST(age_group AS NVARCHAR(100)) AS category,
+        CASE age_group
+            WHEN '18_to_35'     THEN 1
+            WHEN 'more_than_35' THEN 2
+            ELSE 99
+        END AS category_sort,
         COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND age_group IS NOT NULL
@@ -1247,6 +1305,7 @@ edu AS (
         yearweek AS yearweek_sort,
         weeknumber, city, 'Education' AS dimension,
         CAST(edu AS NVARCHAR(100)) AS category,
+        CASE TRY_CAST(edu AS INT) WHEN 0 THEN 1 WHEN 1 THEN 2 ELSE 99 END AS category_sort,
         COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND edu IS NOT NULL
@@ -1256,6 +1315,7 @@ marr AS (
         yearweek AS yearweek_sort,
         weeknumber, city, 'Marital Status' AS dimension,
         CAST(marr_stat AS NVARCHAR(100)) AS category,
+        CASE TRY_CAST(marr_stat AS INT) WHEN 0 THEN 1 WHEN 1 THEN 2 ELSE 99 END AS category_sort,
         COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND marr_stat IS NOT NULL
@@ -1265,6 +1325,7 @@ gen AS (
         yearweek AS yearweek_sort,
         weeknumber, city, 'Gender' AS dimension,
         CAST(gender AS NVARCHAR(100)) AS category,
+        CASE gender WHEN 'Female' THEN 1 WHEN 'Male' THEN 2 ELSE 99 END AS category_sort,
         COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND gender IS NOT NULL
@@ -1274,6 +1335,7 @@ coop AS (
         yearweek AS yearweek_sort,
         weeknumber, city, 'Cooperation Type' AS dimension,
         CAST(cooperation_type AS NVARCHAR(100)) AS category,
+        CASE cooperation_type WHEN 'Full-Time' THEN 1 WHEN 'Part-Time' THEN 2 ELSE 99 END AS category_sort,
         COUNT(*) AS n, SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
     FROM [Cab].[DriverSurvey_ShortMain]
     WHERE city IS NOT NULL AND cooperation_type IS NOT NULL
@@ -1287,38 +1349,69 @@ UNION ALL SELECT *, 100.0 * n / NULLIF(n_total,0) AS pct FROM coop;
 GO
 
 
--- RA-8. COMMISSION-FREE INCENTIVE
+-- RA-8. COMMISSION-FREE INCENTIVE (Updated - Page #18)
 -- Replaces: #18_CommFree_Snapp and #18_CommFree_Tapsi
+-- Type-breakdown columns (multi-select) come from WideMain; all others from ShortMain.
 -- N-cutoff:  n
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_CommFree] AS
 WITH src AS (
-    SELECT yearweek, weeknumber, city,
-        TRY_CAST(active_joint  AS INT)   AS is_joint,
-        TRY_CAST(snapp_commfree AS FLOAT) AS snapp_cf,
-        TRY_CAST(tapsi_commfree AS FLOAT) AS tapsi_cf,
-        snapp_gotmessage_text_incentive,
-        tapsi_gotmessage_text_incentive,
-        CAST(snapp_incentive_category AS NVARCHAR(100)) AS snapp_inc_cat,
-        CAST(tapsi_incentive_category AS NVARCHAR(100)) AS tapsi_inc_cat,
-        snapp_incentive_participation,
-        tapsi_incentive_participation
-    FROM [Cab].[DriverSurvey_ShortMain]
-    WHERE city IS NOT NULL
+    SELECT m.yearweek, m.weeknumber, m.city,
+        TRY_CAST(m.active_joint  AS INT)    AS is_joint,
+        TRY_CAST(m.snapp_commfree AS FLOAT) AS snapp_cf,
+        TRY_CAST(m.tapsi_commfree AS FLOAT) AS tapsi_cf,
+        TRY_CAST(m.snapp_ride AS FLOAT)     AS snapp_ride,
+        TRY_CAST(m.tapsi_ride AS FLOAT)     AS tapsi_ride,
+        m.snapp_gotmessage_text_incentive,
+        m.tapsi_gotmessage_text_incentive,
+        CAST(m.snapp_incentive_category AS NVARCHAR(100)) AS snapp_inc_cat,
+        CAST(m.tapsi_incentive_category AS NVARCHAR(100)) AS tapsi_inc_cat,
+        m.snapp_incentive_participation,
+        m.tapsi_incentive_participation,
+        -- incentive type binary flags (multi-select) live in WideMain
+        TRY_CAST(w.[Snapp Incentive Type__Pay After Ride]              AS INT) AS sn_pay_ride,
+        TRY_CAST(w.[Snapp Incentive Type__Earning-based Commission-free] AS INT) AS sn_earn_cf,
+        TRY_CAST(w.[Snapp Incentive Type__Ride-Based Commission-free]  AS INT) AS sn_ride_cf,
+        TRY_CAST(w.[Snapp Incentive Type__Income Guarantee]            AS INT) AS sn_inc_guar,
+        TRY_CAST(w.[Snapp Incentive Type__Pay After Income]            AS INT) AS sn_pay_inc,
+        TRY_CAST(w.[Snapp Incentive Type__Commission Free on some trips] AS INT) AS sn_cf_some,
+        TRY_CAST(w.[Tapsi Incentive Type__Pay After Ride]              AS INT) AS tp_pay_ride,
+        TRY_CAST(w.[Tapsi Incentive Type__Earning-based Commission-free] AS INT) AS tp_earn_cf,
+        TRY_CAST(w.[Tapsi Incentive Type__Ride-Based Commission-free]  AS INT) AS tp_ride_cf,
+        TRY_CAST(w.[Tapsi Incentive Type__Income Guarantee]            AS INT) AS tp_inc_guar,
+        TRY_CAST(w.[Tapsi Incentive Type__Pay After Income]            AS INT) AS tp_pay_inc,
+        TRY_CAST(w.[Tapsi Incentive Type__Commission Free on some trips] AS INT) AS tp_cf_some
+    FROM [Cab].[DriverSurvey_ShortMain] m
+    LEFT JOIN [Cab].[DriverSurvey_WideMain] w
+        ON CAST(m.recordID AS INT) = CAST(w.recordID AS INT)
+    WHERE m.city IS NOT NULL
 )
 SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
         yearweek AS yearweek_sort,
     weeknumber, city, 'Snapp' AS platform,
     COUNT(*) AS n,
+    -- message receipt by category
     SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END) AS Who_Got_Message,
     SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_inc_cat='Money' THEN 1 ELSE 0 END) AS GotMsg_Money,
     SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_inc_cat='Free-Commission' THEN 1 ELSE 0 END) AS GotMsg_FreeComm,
     SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND snapp_inc_cat='Money & Free-commission' THEN 1 ELSE 0 END) AS GotMsg_Money_FreeComm,
+    -- message receipt by incentive type (binary flags)
+    SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND sn_pay_ride=1 THEN 1 ELSE 0 END) AS GotMsg_PayRide,
+    SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND sn_earn_cf=1 THEN 1 ELSE 0 END) AS GotMsg_EarnCF,
+    SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND sn_ride_cf=1 THEN 1 ELSE 0 END) AS GotMsg_RideCF,
+    SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND sn_inc_guar=1 THEN 1 ELSE 0 END) AS GotMsg_IncGuar,
+    SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND sn_pay_inc=1 THEN 1 ELSE 0 END) AS GotMsg_PayInc,
+    SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' AND sn_cf_some=1 THEN 1 ELSE 0 END) AS GotMsg_CFSome,
+    -- participation & CF ride metrics
     SUM(CASE WHEN snapp_cf > 0 THEN 1 ELSE 0 END) AS Free_Comm_Drivers,
-    100.0 * SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*),0)
-        AS pct_Got_Message,
-    100.0 * SUM(CASE WHEN snapp_cf > 0 THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*),0)
-        AS pct_Free_Comm_Ride
+    SUM(CASE WHEN snapp_incentive_participation='Yes' THEN 1 ELSE 0 END) AS Participated,
+    100.0 * SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*),0) AS pct_Got_Message,
+    100.0 * SUM(CASE WHEN snapp_cf > 0 THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*),0) AS pct_Free_Comm_Ride,
+    100.0 * SUM(CASE WHEN snapp_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_Participated,
+    AVG(CASE WHEN snapp_cf > 0 THEN snapp_cf END) AS Avg_CF_Rides,
+    AVG(snapp_ride) AS Avg_Total_Rides,
+    AVG(CASE WHEN snapp_ride > 0 THEN 100.0 * snapp_cf / snapp_ride END) AS Avg_pct_CF_RideShare
 FROM src
 GROUP BY yearweek, weeknumber, city
 UNION ALL
@@ -1330,11 +1423,23 @@ SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VA
     SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_inc_cat='Money' THEN 1 ELSE 0 END) AS GotMsg_Money,
     SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_inc_cat='Free-Commission' THEN 1 ELSE 0 END) AS GotMsg_FreeComm,
     SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_inc_cat='Money & Free-commission' THEN 1 ELSE 0 END) AS GotMsg_Money_FreeComm,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_pay_ride=1 THEN 1 ELSE 0 END) AS GotMsg_PayRide,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_earn_cf=1 THEN 1 ELSE 0 END) AS GotMsg_EarnCF,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_ride_cf=1 THEN 1 ELSE 0 END) AS GotMsg_RideCF,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_inc_guar=1 THEN 1 ELSE 0 END) AS GotMsg_IncGuar,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_pay_inc=1 THEN 1 ELSE 0 END) AS GotMsg_PayInc,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_cf_some=1 THEN 1 ELSE 0 END) AS GotMsg_CFSome,
     SUM(CASE WHEN is_joint=1 AND tapsi_cf > 0 THEN 1 ELSE 0 END) AS Free_Comm_Drivers,
+    SUM(CASE WHEN is_joint=1 AND tapsi_incentive_participation='Yes' THEN 1 ELSE 0 END) AS Participated,
     100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
         / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS pct_Got_Message,
     100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_cf > 0 THEN 1.0 ELSE 0.0 END)
-        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS pct_Free_Comm_Ride
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1.0 ELSE 0.0 END),0) AS pct_Free_Comm_Ride,
+    100.0 * SUM(CASE WHEN is_joint=1 AND tapsi_incentive_participation='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_Participated,
+    AVG(CASE WHEN is_joint=1 AND tapsi_cf > 0 THEN tapsi_cf END) AS Avg_CF_Rides,
+    AVG(CASE WHEN is_joint=1 THEN tapsi_ride END) AS Avg_Total_Rides,
+    AVG(CASE WHEN is_joint=1 AND tapsi_ride > 0 THEN 100.0 * tapsi_cf / tapsi_ride END) AS Avg_pct_CF_RideShare
 FROM src
 GROUP BY yearweek, weeknumber, city;
 GO
@@ -1395,5 +1500,364 @@ GROUP BY sm.yearweek, sm.weeknumber, sm.city;
 GO
 
 
-PRINT 'All 30 views created successfully (20 dashboard views + 10 routine analysis views)!';
+-- ============================================================
+-- ROUTINE ANALYSIS VIEWS - BATCH 2 (Pages #5/#6, #8, #9, #14, #16, #17, #19)
+-- ============================================================
+
+
+-- RA-11. INCENTIVE TYPE DISTRIBUTION (Pages #5 & #6)
+-- Wide format: pcts by type for Excl-Snapp / Jnt-Snapp / Jnt-Tapsi + avg CF rides
+-- Type binary flags (multi-select) joined from WideMain.
+-- N-cutoff: n_excl (for Snapp Excl metrics), n_joint (for Joint metrics)
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_IncentiveTypes] AS
+WITH src AS (
+    SELECT m.yearweek, m.weeknumber, m.city,
+        TRY_CAST(m.active_joint AS INT) AS is_joint,
+        m.snapp_gotmessage_text_incentive,
+        m.tapsi_gotmessage_text_incentive,
+        TRY_CAST(m.snapp_commfree AS FLOAT) AS snapp_cf,
+        TRY_CAST(m.tapsi_commfree AS FLOAT) AS tapsi_cf,
+        TRY_CAST(w.[Snapp Incentive Type__Pay After Ride]               AS INT) AS sn_pay_ride,
+        TRY_CAST(w.[Snapp Incentive Type__Ride-Based Commission-free]   AS INT) AS sn_ride_cf,
+        TRY_CAST(w.[Snapp Incentive Type__Earning-based Commission-free] AS INT) AS sn_earn_cf,
+        TRY_CAST(w.[Snapp Incentive Type__Income Guarantee]             AS INT) AS sn_inc_guar,
+        TRY_CAST(w.[Snapp Incentive Type__Pay After Income]             AS INT) AS sn_pay_inc,
+        TRY_CAST(w.[Snapp Incentive Type__Commission Free on some trips] AS INT) AS sn_cf_some,
+        TRY_CAST(w.[Tapsi Incentive Type__Pay After Ride]               AS INT) AS tp_pay_ride,
+        TRY_CAST(w.[Tapsi Incentive Type__Ride-Based Commission-free]   AS INT) AS tp_ride_cf,
+        TRY_CAST(w.[Tapsi Incentive Type__Earning-based Commission-free] AS INT) AS tp_earn_cf,
+        TRY_CAST(w.[Tapsi Incentive Type__Income Guarantee]             AS INT) AS tp_inc_guar,
+        TRY_CAST(w.[Tapsi Incentive Type__Pay After Income]             AS INT) AS tp_pay_inc,
+        TRY_CAST(w.[Tapsi Incentive Type__Commission Free on some trips] AS INT) AS tp_cf_some
+    FROM [Cab].[DriverSurvey_ShortMain] m
+    LEFT JOIN [Cab].[DriverSurvey_WideMain] w
+        ON CAST(m.recordID AS INT) = CAST(w.recordID AS INT)
+    WHERE m.city IS NOT NULL
+)
+SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+    yearweek AS yearweek_sort,
+    weeknumber, city,
+    COUNT(*) AS n,
+    SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS n_joint,
+    SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END) AS n_excl,
+    -- Got-message rates by segment
+    100.0*SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_GotMsg_Excl_Snapp,
+    100.0*SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_GotMsg_Jnt_Snapp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_GotMsg_Jnt_Tapsi,
+    100.0*SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND tapsi_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_GotMsg_Both,
+    100.0*SUM(CASE WHEN is_joint=1
+                    AND (snapp_gotmessage_text_incentive='Yes' OR tapsi_gotmessage_text_incentive='Yes')
+                    AND NOT (snapp_gotmessage_text_incentive='Yes' AND tapsi_gotmessage_text_incentive='Yes')
+                   THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_GotMsg_Diff,
+    -- Snapp Exclusive type breakdown (base = n_excl)
+    100.0*SUM(CASE WHEN is_joint=0 AND sn_pay_ride=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_PayRide_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND sn_earn_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_EarnCF_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND sn_ride_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_RideCF_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND sn_inc_guar=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_IncGuar_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND sn_pay_inc=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_PayInc_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND sn_cf_some=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_CFSome_Excl,
+    -- Snapp Joint type breakdown (base = n_joint)
+    100.0*SUM(CASE WHEN is_joint=1 AND sn_pay_ride=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_PayRide_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND sn_earn_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_EarnCF_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND sn_ride_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_RideCF_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND sn_inc_guar=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_IncGuar_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND sn_pay_inc=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_PayInc_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND sn_cf_some=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_CFSome_JntSn,
+    -- Tapsi Joint type breakdown (base = n_joint)
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_pay_ride=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_PayRide_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_earn_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_EarnCF_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_ride_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_RideCF_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_inc_guar=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_IncGuar_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_pay_inc=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_PayInc_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_cf_some=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_CFSome_JntTp,
+    -- Average commission-free rides (among drivers who did CF rides)
+    AVG(CASE WHEN snapp_cf > 0 THEN snapp_cf END) AS Avg_CF_Rides_Snapp,
+    AVG(CASE WHEN is_joint=1 AND tapsi_cf > 0 THEN tapsi_cf END) AS Avg_CF_Rides_Tapsi
+FROM src
+GROUP BY yearweek, weeknumber, city;
+GO
+
+
+-- RA-12. INCENTIVE DISSATISFACTION BY CITY (Page #8)
+-- n_sn_low_sat = drivers who cited any Snapp dissatisfaction reason (multi-select from WideMain).
+-- n_tp_low_sat = joint drivers who cited any Tapsi dissatisfaction reason.
+-- N-cutoff: n_sn_low_sat (Snapp), n_tp_low_sat (Tapsi)
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_IncentiveUnsatCity] AS
+WITH src AS (
+    SELECT m.yearweek, m.weeknumber, m.city,
+        TRY_CAST(m.active_joint AS INT) AS is_joint,
+        -- Snapp unsatisfaction reasons (multi-select) from WideMain
+        TRY_CAST(w.[Snapp Last Incentive Unsatisfaction__Not Available]  AS INT) AS sn_no_time,
+        TRY_CAST(w.[Snapp Last Incentive Unsatisfaction__Improper Amount] AS INT) AS sn_imp_amt,
+        TRY_CAST(w.[Snapp Last Incentive Unsatisfaction__No Time todo]   AS INT) AS sn_low_time,
+        TRY_CAST(w.[Snapp Last Incentive Unsatisfaction__difficult]      AS INT) AS sn_hard,
+        TRY_CAST(w.[Snapp Last Incentive Unsatisfaction__Non Payment]    AS INT) AS sn_nonpay,
+        -- Tapsi unsatisfaction reasons from WideMain
+        TRY_CAST(w.[Tapsi Incentive Unsatisfaction__Not Available]       AS INT) AS tp_no_time,
+        TRY_CAST(w.[Tapsi Incentive Unsatisfaction__Improper Amount]     AS INT) AS tp_imp_amt,
+        TRY_CAST(w.[Tapsi Incentive Unsatisfaction__No Time todo]        AS INT) AS tp_low_time,
+        TRY_CAST(w.[Tapsi Incentive Unsatisfaction__difficult]           AS INT) AS tp_hard,
+        TRY_CAST(w.[Tapsi Incentive Unsatisfaction__Non Payment]         AS INT) AS tp_nonpay
+    FROM [Cab].[DriverSurvey_ShortMain] m
+    LEFT JOIN [Cab].[DriverSurvey_WideMain] w
+        ON CAST(m.recordID AS INT) = CAST(w.recordID AS INT)
+    WHERE m.city IS NOT NULL
+),
+agg AS (
+    SELECT yearweek, weeknumber, city, is_joint,
+        sn_no_time, sn_imp_amt, sn_low_time, sn_hard, sn_nonpay,
+        tp_no_time, tp_imp_amt, tp_low_time, tp_hard, tp_nonpay,
+        -- low-sat flag: cited any reason
+        CASE WHEN (sn_no_time=1 OR sn_imp_amt=1 OR sn_low_time=1 OR sn_hard=1 OR sn_nonpay=1)
+             THEN 1 ELSE 0 END AS sn_low_sat,
+        CASE WHEN (tp_no_time=1 OR tp_imp_amt=1 OR tp_low_time=1 OR tp_hard=1 OR tp_nonpay=1)
+             THEN 1 ELSE 0 END AS tp_low_sat
+    FROM src
+)
+SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+    yearweek AS yearweek_sort,
+    weeknumber, city,
+    COUNT(*) AS n_all,
+    SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS n_joint,
+    SUM(sn_low_sat) AS n_sn_low_sat,
+    SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END) AS n_tp_low_sat,
+    -- All Snapp dissatisfaction reasons (base = n_sn_low_sat)
+    100.0*SUM(CASE WHEN sn_low_sat=1 AND sn_no_time=1  THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(sn_low_sat),0) AS pct_Sn_NoTime,
+    100.0*SUM(CASE WHEN sn_low_sat=1 AND sn_imp_amt=1  THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(sn_low_sat),0) AS pct_Sn_ImpAmt,
+    100.0*SUM(CASE WHEN sn_low_sat=1 AND sn_low_time=1 THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(sn_low_sat),0) AS pct_Sn_LowTime,
+    100.0*SUM(CASE WHEN sn_low_sat=1 AND sn_hard=1     THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(sn_low_sat),0) AS pct_Sn_HardToDo,
+    100.0*SUM(CASE WHEN sn_low_sat=1 AND sn_nonpay=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(sn_low_sat),0) AS pct_Sn_NonPay,
+    -- Joint Tapsi dissatisfaction reasons (base = n_tp_low_sat)
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_low_sat=1 AND tp_no_time=1  THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END),0) AS pct_Tp_NoTime,
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_low_sat=1 AND tp_imp_amt=1  THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END),0) AS pct_Tp_ImpAmt,
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_low_sat=1 AND tp_low_time=1 THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END),0) AS pct_Tp_LowTime,
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_low_sat=1 AND tp_hard=1     THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END),0) AS pct_Tp_HardToDo,
+    100.0*SUM(CASE WHEN is_joint=1 AND tp_low_sat=1 AND tp_nonpay=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END),0) AS pct_Tp_NonPay
+FROM agg
+GROUP BY yearweek, weeknumber, city;
+GO
+
+
+-- RA-13. INCENTIVE DISSATISFACTION - NATIONAL LEVEL (Page #9)
+-- Long format: segment = All Snapp / Joint Snapp / Joint Tapsi; no city breakdown
+-- N-cutoff: n_low_sat per segment
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_IncentiveUnsatNational] AS
+WITH src AS (
+    SELECT yearweek, weeknumber,
+        TRY_CAST(active_joint AS INT) AS is_joint,
+        TRY_CAST(snapp_incentive_satisfaction AS FLOAT) AS sn_sat,
+        TRY_CAST(tapsi_incentive_satisfaction AS FLOAT) AS tp_sat,
+        TRY_CAST(snapp_lincentive_unsatisfaction_not_available  AS INT) AS sn_no_time,
+        TRY_CAST(snapp_lincentive_unsatisfaction_improper_amount AS INT) AS sn_imp_amt,
+        TRY_CAST(snapp_lincentive_unsatisfaction_no_time        AS INT) AS sn_low_time,
+        TRY_CAST(snapp_lincentive_unsatisfaction_difficult      AS INT) AS sn_hard,
+        TRY_CAST(snapp_lincentive_unsatisfaction_non_payment    AS INT) AS sn_nonpay,
+        TRY_CAST(snapp_lincentive_unsatisfaction_other          AS INT) AS sn_other,
+        TRY_CAST(tapsi_lincentive_unsatisfaction_not_available  AS INT) AS tp_no_time,
+        TRY_CAST(tapsi_lincentive_unsatisfaction_improper_amount AS INT) AS tp_imp_amt,
+        TRY_CAST(tapsi_lincentive_unsatisfaction_no_time        AS INT) AS tp_low_time,
+        TRY_CAST(tapsi_lincentive_unsatisfaction_difficult      AS INT) AS tp_hard,
+        TRY_CAST(tapsi_lincentive_unsatisfaction_non_payment    AS INT) AS tp_nonpay,
+        TRY_CAST(tapsi_lincentive_unsatisfaction_other          AS INT) AS tp_other
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL
+),
+all_snapp AS (
+    SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort, weeknumber,
+        'All Snapp' AS segment, 1 AS segment_sort,
+        COUNT(*) AS n,
+        SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END) AS n_low_sat,
+        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_no_time=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NoTime,
+        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_imp_amt=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_ImpAmt,
+        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_low_time=1 THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_LowTime,
+        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_hard=1     THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_HardToDo,
+        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_nonpay=1   THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NonPay,
+        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_other=1    THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_Other
+    FROM src GROUP BY yearweek, weeknumber
+),
+jnt_snapp AS (
+    SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort, weeknumber,
+        'Joint Snapp' AS segment, 2 AS segment_sort,
+        SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS n,
+        SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END) AS n_low_sat,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_no_time=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NoTime,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_imp_amt=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_ImpAmt,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_low_time=1 THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_LowTime,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_hard=1     THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_HardToDo,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_nonpay=1   THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NonPay,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_other=1    THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_Other
+    FROM src GROUP BY yearweek, weeknumber
+),
+jnt_tapsi AS (
+    SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort, weeknumber,
+        'Joint Tapsi' AS segment, 3 AS segment_sort,
+        SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS n,
+        SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END) AS n_low_sat,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_no_time=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NoTime,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_imp_amt=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_ImpAmt,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_low_time=1 THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_LowTime,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_hard=1     THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_HardToDo,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_nonpay=1   THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NonPay,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_other=1    THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_Other
+    FROM src GROUP BY yearweek, weeknumber
+)
+SELECT * FROM all_snapp
+UNION ALL SELECT * FROM jnt_snapp
+UNION ALL SELECT * FROM jnt_tapsi;
+GO
+
+
+-- RA-14. NAVIGATION APP USAGE BY CITY (Page #14)
+-- Long format: platform = Snapp / Tapsi; pct by app; Tapsi base = joint drivers only
+-- N-cutoff: n
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_Navigation] AS
+WITH src AS (
+    SELECT yearweek, weeknumber, city,
+        TRY_CAST(active_joint AS INT) AS is_joint,
+        snapp_last_trip_navigation,
+        tapsi_navigation_type
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL
+),
+snapp_nav AS (
+    SELECT
+        CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort, weeknumber, city, 'Snapp' AS platform,
+        SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL THEN 1 ELSE 0 END) AS n,
+        100.0*SUM(CASE WHEN snapp_last_trip_navigation='Neshan'            THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Neshan,
+        100.0*SUM(CASE WHEN snapp_last_trip_navigation='Balad'             THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Balad,
+        100.0*SUM(CASE WHEN snapp_last_trip_navigation='No Navigation App' THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_None,
+        100.0*SUM(CASE WHEN snapp_last_trip_navigation='Google Map'        THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_GoogleMap,
+        100.0*SUM(CASE WHEN snapp_last_trip_navigation='Waze'              THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Waze,
+        CAST(NULL AS FLOAT) AS pct_InAppNav,
+        100.0*SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL
+                        AND snapp_last_trip_navigation NOT IN ('Neshan','Balad','No Navigation App','Google Map','Waze')
+                       THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Other
+    FROM src
+    GROUP BY yearweek, weeknumber, city
+),
+tapsi_nav AS (
+    SELECT
+        CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+        yearweek AS yearweek_sort, weeknumber, city, 'Tapsi' AS platform,
+        SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type IS NOT NULL THEN 1 ELSE 0 END) AS n,
+        100.0*SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type='Neshan'            THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Neshan,
+        100.0*SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type='Balad'             THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Balad,
+        100.0*SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type='No Navigation App' THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_None,
+        CAST(NULL AS FLOAT) AS pct_GoogleMap,
+        CAST(NULL AS FLOAT) AS pct_Waze,
+        100.0*SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type='In-App Navigation' THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_InAppNav,
+        100.0*SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type IS NOT NULL
+                        AND tapsi_navigation_type NOT IN ('Neshan','Balad','No Navigation App','In-App Navigation')
+                       THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Other
+    FROM src
+    GROUP BY yearweek, weeknumber, city
+)
+SELECT * FROM snapp_nav
+UNION ALL SELECT * FROM tapsi_nav;
+GO
+
+
+-- RA-15. REFERRAL / JOINING BONUS BY CITY (Page #16)
+-- Snapp joining bonus: all drivers; Tapsi joining bonus: joint drivers only
+-- N-cutoff: n_Snapp, n_Tapsi
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_Referral] AS
+WITH src AS (
+    SELECT yearweek, weeknumber, city,
+        TRY_CAST(active_joint AS INT) AS is_joint,
+        snapp_joining_bonus,
+        tapsi_joining_bonus
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL
+)
+SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+    yearweek AS yearweek_sort,
+    weeknumber, city,
+    SUM(CASE WHEN snapp_joining_bonus IS NOT NULL THEN 1 ELSE 0 END) AS n_Snapp,
+    SUM(CASE WHEN snapp_joining_bonus='Yes' THEN 1 ELSE 0 END) AS joining_Snapp,
+    100.0*SUM(CASE WHEN snapp_joining_bonus='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN snapp_joining_bonus IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Joining_Snapp,
+    SUM(CASE WHEN is_joint=1 AND tapsi_joining_bonus IS NOT NULL THEN 1 ELSE 0 END) AS n_Tapsi,
+    SUM(CASE WHEN is_joint=1 AND tapsi_joining_bonus='Yes' THEN 1 ELSE 0 END) AS joining_Tapsi,
+    100.0*SUM(CASE WHEN is_joint=1 AND tapsi_joining_bonus='Yes' THEN 1.0 ELSE 0.0 END)
+        / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_joining_bonus IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Joining_Tapsi
+FROM src
+GROUP BY yearweek, weeknumber, city;
+GO
+
+
+-- RA-16. TAPSI INACTIVITY BEFORE INCENTIVE BY CITY (Page #17)
+-- Joint drivers only; long format with inactivity bucket + sort key
+-- N-cutoff: n (per bucket)
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_TapsiInactivity] AS
+WITH src AS (
+    SELECT yearweek, weeknumber, city,
+        TRY_CAST(active_joint AS INT) AS is_joint,
+        tapsi_inactive_b4_incentive
+    FROM [Cab].[DriverSurvey_ShortMain]
+    WHERE city IS NOT NULL
+)
+SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+    yearweek AS yearweek_sort,
+    weeknumber, city,
+    tapsi_inactive_b4_incentive AS inactivity_bucket,
+    CASE tapsi_inactive_b4_incentive
+        WHEN 'Same Day'           THEN 1
+        WHEN '1_3 Day Before'     THEN 2
+        WHEN '3_7 Days Before'    THEN 3
+        WHEN '8_14 Days Before'   THEN 4
+        WHEN '15_30 Days_Before'  THEN 5
+        WHEN '1_2 Month Before'   THEN 6
+        WHEN '2_3 Month Before'   THEN 7
+        WHEN '3_6Month Before'    THEN 8
+        WHEN '>6 Month Before'    THEN 9
+        ELSE 99
+    END AS bucket_sort,
+    COUNT(*) AS n,
+    SUM(COUNT(*)) OVER (PARTITION BY yearweek, city) AS n_total
+FROM src
+WHERE is_joint = 1
+  AND tapsi_inactive_b4_incentive IS NOT NULL
+GROUP BY yearweek, weeknumber, city, tapsi_inactive_b4_incentive;
+GO
+
+
+-- RA-17. LUCKY WHEEL USAGE (Page #19)
+-- wheel column stores Rial amount won; 0 = did not use
+-- N-cutoff: n
+GO
+CREATE OR ALTER VIEW [Cab].[vw_RA_LuckyWheel] AS
+SELECT
+    CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
+    yearweek AS yearweek_sort,
+    weeknumber, city,
+    COUNT(*) AS n,
+    SUM(CASE WHEN TRY_CAST(wheel AS FLOAT) > 0 THEN 1 ELSE 0 END) AS n_users,
+    100.0*SUM(CASE WHEN TRY_CAST(wheel AS FLOAT) > 0 THEN 1.0 ELSE 0.0 END) / NULLIF(COUNT(*),0) AS pct_usage,
+    AVG(CASE WHEN TRY_CAST(wheel AS FLOAT) > 0 THEN TRY_CAST(wheel AS FLOAT) END) AS avg_wheel_amount
+FROM [Cab].[DriverSurvey_ShortMain]
+WHERE city IS NOT NULL
+GROUP BY yearweek, weeknumber, city;
+GO
+
+
+PRINT 'All 37 views created successfully (20 dashboard views + 17 routine analysis views)!';
 GO
