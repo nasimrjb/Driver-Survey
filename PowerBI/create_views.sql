@@ -1648,71 +1648,75 @@ GO
 
 
 -- RA-13. INCENTIVE DISSATISFACTION - NATIONAL LEVEL (Page #9)
--- Long format: segment = All Snapp / Joint Snapp / Joint Tapsi; no city breakdown
+-- Long format: segment = All Snapp / Joint Snapp / Joint Tapsi; no city breakdown.
+-- n_low_sat = drivers who cited any dissatisfaction reason (multi-select from WideMain).
 -- N-cutoff: n_low_sat per segment
 GO
 CREATE OR ALTER VIEW [Cab].[vw_RA_IncentiveUnsatNational] AS
 WITH src AS (
-    SELECT yearweek, weeknumber,
-        TRY_CAST(active_joint AS INT) AS is_joint,
-        TRY_CAST(snapp_incentive_satisfaction AS FLOAT) AS sn_sat,
-        TRY_CAST(tapsi_incentive_satisfaction AS FLOAT) AS tp_sat,
-        TRY_CAST(snapp_lincentive_unsatisfaction_not_available  AS INT) AS sn_no_time,
-        TRY_CAST(snapp_lincentive_unsatisfaction_improper_amount AS INT) AS sn_imp_amt,
-        TRY_CAST(snapp_lincentive_unsatisfaction_no_time        AS INT) AS sn_low_time,
-        TRY_CAST(snapp_lincentive_unsatisfaction_difficult      AS INT) AS sn_hard,
-        TRY_CAST(snapp_lincentive_unsatisfaction_non_payment    AS INT) AS sn_nonpay,
-        TRY_CAST(snapp_lincentive_unsatisfaction_other          AS INT) AS sn_other,
-        TRY_CAST(tapsi_lincentive_unsatisfaction_not_available  AS INT) AS tp_no_time,
-        TRY_CAST(tapsi_lincentive_unsatisfaction_improper_amount AS INT) AS tp_imp_amt,
-        TRY_CAST(tapsi_lincentive_unsatisfaction_no_time        AS INT) AS tp_low_time,
-        TRY_CAST(tapsi_lincentive_unsatisfaction_difficult      AS INT) AS tp_hard,
-        TRY_CAST(tapsi_lincentive_unsatisfaction_non_payment    AS INT) AS tp_nonpay,
-        TRY_CAST(tapsi_lincentive_unsatisfaction_other          AS INT) AS tp_other
-    FROM [Cab].[DriverSurvey_ShortMain]
-    WHERE city IS NOT NULL
+    SELECT m.yearweek, m.weeknumber,
+        TRY_CAST(m.active_joint AS INT) AS is_joint,
+        TRY_CAST(w.[Snapp Last Incentive Unsatisfaction__Not Available]  AS INT) AS sn_no_time,
+        TRY_CAST(w.[Snapp Last Incentive Unsatisfaction__Improper Amount] AS INT) AS sn_imp_amt,
+        TRY_CAST(w.[Snapp Last Incentive Unsatisfaction__No Time todo]   AS INT) AS sn_low_time,
+        TRY_CAST(w.[Snapp Last Incentive Unsatisfaction__difficult]      AS INT) AS sn_hard,
+        TRY_CAST(w.[Snapp Last Incentive Unsatisfaction__Non Payment]    AS INT) AS sn_nonpay,
+        TRY_CAST(w.[Tapsi Incentive Unsatisfaction__Not Available]       AS INT) AS tp_no_time,
+        TRY_CAST(w.[Tapsi Incentive Unsatisfaction__Improper Amount]     AS INT) AS tp_imp_amt,
+        TRY_CAST(w.[Tapsi Incentive Unsatisfaction__No Time todo]        AS INT) AS tp_low_time,
+        TRY_CAST(w.[Tapsi Incentive Unsatisfaction__difficult]           AS INT) AS tp_hard,
+        TRY_CAST(w.[Tapsi Incentive Unsatisfaction__Non Payment]         AS INT) AS tp_nonpay
+    FROM [Cab].[DriverSurvey_ShortMain] m
+    LEFT JOIN [Cab].[DriverSurvey_WideMain] w
+        ON CAST(m.recordID AS INT) = CAST(w.recordID AS INT)
+    WHERE m.city IS NOT NULL
+),
+flagged AS (
+    SELECT *,
+        CASE WHEN (sn_no_time=1 OR sn_imp_amt=1 OR sn_low_time=1 OR sn_hard=1 OR sn_nonpay=1)
+             THEN 1 ELSE 0 END AS sn_low_sat,
+        CASE WHEN (tp_no_time=1 OR tp_imp_amt=1 OR tp_low_time=1 OR tp_hard=1 OR tp_nonpay=1)
+             THEN 1 ELSE 0 END AS tp_low_sat
+    FROM src
 ),
 all_snapp AS (
     SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
         yearweek AS yearweek_sort, weeknumber,
         'All Snapp' AS segment, 1 AS segment_sort,
         COUNT(*) AS n,
-        SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END) AS n_low_sat,
-        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_no_time=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NoTime,
-        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_imp_amt=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_ImpAmt,
-        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_low_time=1 THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_LowTime,
-        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_hard=1     THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_HardToDo,
-        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_nonpay=1   THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NonPay,
-        100.0*SUM(CASE WHEN sn_sat<=3 AND sn_other=1    THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_Other
-    FROM src GROUP BY yearweek, weeknumber
+        SUM(sn_low_sat) AS n_low_sat,
+        100.0*SUM(CASE WHEN sn_low_sat=1 AND sn_no_time=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(sn_low_sat),0) AS pct_NoTime,
+        100.0*SUM(CASE WHEN sn_low_sat=1 AND sn_imp_amt=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(sn_low_sat),0) AS pct_ImpAmt,
+        100.0*SUM(CASE WHEN sn_low_sat=1 AND sn_low_time=1 THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(sn_low_sat),0) AS pct_LowTime,
+        100.0*SUM(CASE WHEN sn_low_sat=1 AND sn_hard=1     THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(sn_low_sat),0) AS pct_HardToDo,
+        100.0*SUM(CASE WHEN sn_low_sat=1 AND sn_nonpay=1   THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(sn_low_sat),0) AS pct_NonPay
+    FROM flagged GROUP BY yearweek, weeknumber
 ),
 jnt_snapp AS (
     SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
         yearweek AS yearweek_sort, weeknumber,
         'Joint Snapp' AS segment, 2 AS segment_sort,
         SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS n,
-        SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END) AS n_low_sat,
-        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_no_time=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NoTime,
-        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_imp_amt=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_ImpAmt,
-        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_low_time=1 THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_LowTime,
-        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_hard=1     THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_HardToDo,
-        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_nonpay=1   THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NonPay,
-        100.0*SUM(CASE WHEN is_joint=1 AND sn_sat<=3 AND sn_other=1    THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND sn_sat IS NOT NULL AND sn_sat<=3 THEN 1 ELSE 0 END),0) AS pct_Other
-    FROM src GROUP BY yearweek, weeknumber
+        SUM(CASE WHEN is_joint=1 THEN sn_low_sat ELSE 0 END) AS n_low_sat,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_low_sat=1 AND sn_no_time=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 THEN sn_low_sat ELSE 0 END),0) AS pct_NoTime,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_low_sat=1 AND sn_imp_amt=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 THEN sn_low_sat ELSE 0 END),0) AS pct_ImpAmt,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_low_sat=1 AND sn_low_time=1 THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 THEN sn_low_sat ELSE 0 END),0) AS pct_LowTime,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_low_sat=1 AND sn_hard=1     THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 THEN sn_low_sat ELSE 0 END),0) AS pct_HardToDo,
+        100.0*SUM(CASE WHEN is_joint=1 AND sn_low_sat=1 AND sn_nonpay=1   THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 THEN sn_low_sat ELSE 0 END),0) AS pct_NonPay
+    FROM flagged GROUP BY yearweek, weeknumber
 ),
 jnt_tapsi AS (
     SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
         yearweek AS yearweek_sort, weeknumber,
         'Joint Tapsi' AS segment, 3 AS segment_sort,
         SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS n,
-        SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END) AS n_low_sat,
-        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_no_time=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NoTime,
-        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_imp_amt=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_ImpAmt,
-        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_low_time=1 THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_LowTime,
-        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_hard=1     THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_HardToDo,
-        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_nonpay=1   THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_NonPay,
-        100.0*SUM(CASE WHEN is_joint=1 AND tp_sat<=3 AND tp_other=1    THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tp_sat IS NOT NULL AND tp_sat<=3 THEN 1 ELSE 0 END),0) AS pct_Other
-    FROM src GROUP BY yearweek, weeknumber
+        SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END) AS n_low_sat,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_low_sat=1 AND tp_no_time=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END),0) AS pct_NoTime,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_low_sat=1 AND tp_imp_amt=1  THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END),0) AS pct_ImpAmt,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_low_sat=1 AND tp_low_time=1 THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END),0) AS pct_LowTime,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_low_sat=1 AND tp_hard=1     THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END),0) AS pct_HardToDo,
+        100.0*SUM(CASE WHEN is_joint=1 AND tp_low_sat=1 AND tp_nonpay=1   THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 THEN tp_low_sat ELSE 0 END),0) AS pct_NonPay
+    FROM flagged GROUP BY yearweek, weeknumber
 )
 SELECT * FROM all_snapp
 UNION ALL SELECT * FROM jnt_snapp
