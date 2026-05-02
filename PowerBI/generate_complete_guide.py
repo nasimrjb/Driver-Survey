@@ -524,8 +524,10 @@ body('Columns:', bold=True)
 col_table(
     ['Column', 'Type', 'Notes'],
     [
-        ('yearweek / yearweek_sort / weeknumber / city / platform', '', 'Snapp or Tapsi'),
-        ('n', 'INT', 'base respondents'),
+        ('yearweek / yearweek_sort / weeknumber / city', '', ''),
+        ('platform', 'TEXT', '"Snapp" or "Tapsi"'),
+        ('platform_sort', 'INT', '1=Snapp, 2=Tapsi — use to sort platform in Matrix Columns'),
+        ('n', 'INT', 'base respondents (all for Snapp; joint only for Tapsi)'),
         ('Who_Got_Message', 'INT', 'received incentive message'),
         ('GotMsg_Money', 'INT', 'msg received, category = Money'),
         ('GotMsg_FreeComm', 'INT', 'msg received, category = Free-Commission'),
@@ -538,9 +540,9 @@ col_table(
         ('GotMsg_CFSome', 'INT', 'received msg + CF Some Trips type'),
         ('Free_Comm_Drivers', 'INT', 'drivers with CF rides > 0'),
         ('Participated', 'INT', 'participated in incentive'),
-        ('pct_Got_Message', 'FLOAT', '% of n'),
-        ('pct_Free_Comm_Ride', 'FLOAT', '% of n'),
-        ('pct_Participated', 'FLOAT', '% of Who_Got_Message'),
+        ('pct_Got_Message', 'FLOAT', '% of n who got message'),
+        ('pct_Free_Comm_Ride', 'FLOAT', '% of n with CF rides > 0'),
+        ('pct_Participated', 'FLOAT', '% of Who_Got_Message who participated'),
         ('Avg_CF_Rides', 'FLOAT', 'avg CF rides among CF drivers only'),
         ('Avg_Total_Rides', 'FLOAT', 'avg total rides'),
         ('Avg_pct_CF_RideShare', 'FLOAT', 'avg CF% of total rides'),
@@ -598,24 +600,26 @@ for plat in ('Snapp', 'Tapsi'):
         f'    BLANK())'
     )
 
-for plat, type_cols in [
-    ('Snapp', ['GotMsg_PayRide', 'GotMsg_EarnCF', 'GotMsg_RideCF',
-               'GotMsg_IncGuar', 'GotMsg_PayInc', 'GotMsg_CFSome']),
-    ('Tapsi', ['GotMsg_PayRide', 'GotMsg_EarnCF', 'GotMsg_RideCF',
-               'GotMsg_IncGuar', 'GotMsg_PayInc', 'GotMsg_CFSome']),
-]:
-    dax_measure(
-        f'RA8 GotMsg by Type% ({plat}) =\n'
-        f'// Divide each GotMsg_* count by Who_Got_Message for the type breakdown\n'
-        f'{yw_var(V)}\n'
-        f'VAR WhoGot = CALCULATE(SUM({V}[Who_Got_Message]),\n'
-        f'    {V}[yearweek] = SelYearWeek, {V}[platform] = "{plat}")\n'
-        f'VAR MinN = [Min N Cutoff Value]\n'
-        f'// Replace GotMsg_PayRide with whichever type column you need:\n'
-        f'VAR NType  = CALCULATE(SUM({V}[GotMsg_PayRide]),\n'
-        f'    {V}[yearweek] = SelYearWeek, {V}[platform] = "{plat}")\n'
-        f'RETURN IF(WhoGot >= MinN, DIVIDE(NType, WhoGot) * 100, BLANK())'
-    )
+CF_TYPES = [
+    ('PayRide',  'GotMsg_PayRide'),
+    ('EarnCF',   'GotMsg_EarnCF'),
+    ('RideCF',   'GotMsg_RideCF'),
+    ('IncGuar',  'GotMsg_IncGuar'),
+    ('PayInc',   'GotMsg_PayInc'),
+    ('CFSome',   'GotMsg_CFSome'),
+]
+for plat in ('Snapp', 'Tapsi'):
+    for short_name, col in CF_TYPES:
+        dax_measure(
+            f'RA8 pct {short_name} ({plat}) =\n'
+            f'{yw_var(V)}\n'
+            f'VAR WhoGot = CALCULATE(SUM({V}[Who_Got_Message]),\n'
+            f'    {V}[yearweek] = SelYearWeek, {V}[platform] = "{plat}")\n'
+            f'VAR MinN = [Min N Cutoff Value]\n'
+            f'VAR NType = CALCULATE(SUM({V}[{col}]),\n'
+            f'    {V}[yearweek] = SelYearWeek, {V}[platform] = "{plat}")\n'
+            f'RETURN IF(WhoGot >= MinN, DIVIDE(NType, WhoGot) * 100, BLANK())'
+        )
     dax_measure(
         f'RA8 Avg CF Rides ({plat}) =\n'
         f'{yw_var(V)}\n'
@@ -738,24 +742,30 @@ dax_measure(wow_dax('RA10 WoW Snapp NPS', V, f'AVERAGE({V}[Snapp_NPS])'))
 # ════════════════════════════════════════════════════════════════════════════
 heading('13. RA-11 – Incentive Type Distribution', level=1)
 body('View: vw_RA_IncentiveTypes  |  Excel Pages: #5 (Snapp Excl), #6 (Joint)', bold=True)
-body('Multi-select incentive type flags (6 types × 3 segments). Base: n_excl for Excl metrics, n_joint for Joint.')
+body('Multi-select incentive type flags (7 types × 3 segments). '
+     'Base for type %: n_excl_gotmsg (Excl), n_joint_gotmsg_sn (JntSn), n_joint_gotmsg_tp (JntTp) — '
+     'only drivers who received a gotmessage incentive, matching Excel denominator.')
 body('Columns:', bold=True)
 col_table(
     ['Column', 'Type', 'Notes'],
     [
         ('yearweek / yearweek_sort / weeknumber / city', '', ''),
-        ('n / n_joint / n_excl', 'INT', ''),
-        ('pct_GotMsg_Excl_Snapp', 'FLOAT', '% excl drivers who got Snapp msg'),
+        ('n / n_joint / n_excl', 'INT', 'all respondents in segment'),
+        ('n_excl_gotmsg', 'INT', 'excl drivers with Snapp gotmessage=Yes — type % denominator'),
+        ('n_joint_gotmsg_sn', 'INT', 'joint drivers with Snapp gotmessage=Yes'),
+        ('n_joint_gotmsg_tp', 'INT', 'joint drivers with Tapsi gotmessage=Yes'),
+        ('pct_GotMsg_Excl_Snapp', 'FLOAT', '% excl drivers who got Snapp msg (base = n_excl)'),
         ('pct_GotMsg_Jnt_Snapp', 'FLOAT', '% joint who got Snapp msg'),
         ('pct_GotMsg_Jnt_Tapsi', 'FLOAT', '% joint who got Tapsi msg'),
         ('pct_GotMsg_Both', 'FLOAT', '% joint who got both msgs'),
         ('pct_GotMsg_Diff', 'FLOAT', '% joint who got only one msg'),
-        ('pct_PayRide_Excl / JntSn / JntTp', 'FLOAT', 'Pay After Ride type %'),
+        ('pct_PayRide_Excl / JntSn / JntTp', 'FLOAT', 'Pay After Ride — % of gotmsg drivers'),
         ('pct_EarnCF_Excl / JntSn / JntTp', 'FLOAT', 'Earning-Based CF type %'),
         ('pct_RideCF_Excl / JntSn / JntTp', 'FLOAT', 'Ride-Based CF type %'),
         ('pct_IncGuar_Excl / JntSn / JntTp', 'FLOAT', 'Income Guarantee type %'),
         ('pct_PayInc_Excl / JntSn / JntTp', 'FLOAT', 'Pay After Income type %'),
         ('pct_CFSome_Excl / JntSn / JntTp', 'FLOAT', 'CF on Some Trips type %'),
+        ('pct_Other_Excl / JntSn / JntTp', 'FLOAT', 'Other incentive type %'),
         ('Avg_CF_Rides_Snapp', 'FLOAT', 'avg CF rides (CF drivers only)'),
         ('Avg_CF_Rides_Tapsi', 'FLOAT', ''),
     ]
@@ -764,16 +774,21 @@ doc.add_paragraph()
 body('DAX Measures:', bold=True)
 
 V = 'vw_RA_IncentiveTypes'
+note('n_excl_gotmsg / n_joint_gotmsg_sn / n_joint_gotmsg_tp are the gotmessage=Yes counts used as '
+     'MinN gates for type % measures — matching the Excel denominator (only drivers who received the incentive message).')
 dax_measure(count_dax('RA11 n Excl', V, count_col='n_excl'))
 dax_measure(count_dax('RA11 n Joint', V, count_col='n_joint'))
+dax_measure(count_dax('RA11 n Excl GotMsg', V, count_col='n_excl_gotmsg'))
+dax_measure(count_dax('RA11 n Joint GotMsg Sn', V, count_col='n_joint_gotmsg_sn'))
+dax_measure(count_dax('RA11 n Joint GotMsg Tp', V, count_col='n_joint_gotmsg_tp'))
 dax_measure(metric_dax('RA11 pct GotMsg Excl Snapp', V, f'AVERAGE({V}[pct_GotMsg_Excl_Snapp])', n_col='n_excl'))
 dax_measure(metric_dax('RA11 pct GotMsg Jnt Snapp', V, f'AVERAGE({V}[pct_GotMsg_Jnt_Snapp])', n_col='n_joint'))
 dax_measure(metric_dax('RA11 pct GotMsg Jnt Tapsi', V, f'AVERAGE({V}[pct_GotMsg_Jnt_Tapsi])', n_col='n_joint'))
 dax_measure(metric_dax('RA11 pct GotMsg Both', V, f'AVERAGE({V}[pct_GotMsg_Both])', n_col='n_joint'))
 dax_measure(metric_dax('RA11 pct GotMsg Diff', V, f'AVERAGE({V}[pct_GotMsg_Diff])', n_col='n_joint'))
 
-for seg, base in [('Excl', 'n_excl'), ('JntSn', 'n_joint'), ('JntTp', 'n_joint')]:
-    for t in ['PayRide', 'EarnCF', 'RideCF', 'IncGuar', 'PayInc', 'CFSome']:
+for seg, base in [('Excl', 'n_excl_gotmsg'), ('JntSn', 'n_joint_gotmsg_sn'), ('JntTp', 'n_joint_gotmsg_tp')]:
+    for t in ['PayRide', 'EarnCF', 'RideCF', 'IncGuar', 'PayInc', 'CFSome', 'Other']:
         col = f'pct_{t}_{seg}'
         dax_measure(metric_dax(f'RA11 {col}', V, f'AVERAGE({V}[{col}])', n_col=base))
 
@@ -909,7 +924,9 @@ body('Columns:', bold=True)
 col_table(
     ['Column', 'Type', 'Notes'],
     [
-        ('yearweek / yearweek_sort / weeknumber / city / platform', '', 'Snapp or Tapsi'),
+        ('yearweek / yearweek_sort / weeknumber / city', '', ''),
+        ('platform', 'TEXT', '"Snapp" or "Tapsi"'),
+        ('platform_sort', 'INT', '1=Snapp, 2=Tapsi — use to sort platform in Matrix Columns'),
         ('n', 'INT', 'respondents with non-null navigation answer'),
         ('pct_Neshan', 'FLOAT', ''),
         ('pct_Balad', 'FLOAT', ''),

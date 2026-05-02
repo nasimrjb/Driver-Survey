@@ -248,7 +248,7 @@ SELECT
     AVG(CAST(active_joint AS FLOAT)) * 100 AS joint_pct,
     -- Avg rides
     AVG(snapp_ride) AS snapp_ride_avg,
-    AVG(tapsi_ride) AS tapsi_ride_avg,
+    AVG(tapsi_ride) AS tapsi_ride_avg, 
     -- Avg LOC
     AVG(snapp_LOC) AS snapp_LOC_avg,
     AVG(tapsi_LOC) AS tapsi_LOC_avg,
@@ -1388,7 +1388,7 @@ WITH src AS (
 )
 SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
         yearweek AS yearweek_sort,
-    weeknumber, city, 'Snapp' AS platform,
+    weeknumber, city, 'Snapp' AS platform, 1 AS platform_sort,
     COUNT(*) AS n,
     -- message receipt by category
     SUM(CASE WHEN snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END) AS Who_Got_Message,
@@ -1417,7 +1417,7 @@ GROUP BY yearweek, weeknumber, city
 UNION ALL
 SELECT CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
         yearweek AS yearweek_sort,
-    weeknumber, city, 'Tapsi' AS platform,
+    weeknumber, city, 'Tapsi' AS platform, 2 AS platform_sort,
     SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS n,
     SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END) AS Who_Got_Message,
     SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tapsi_inc_cat='Money' THEN 1 ELSE 0 END) AS GotMsg_Money,
@@ -1529,7 +1529,9 @@ WITH src AS (
         TRY_CAST(w.[Tapsi Incentive Type__Earning-based Commission-free] AS INT) AS tp_earn_cf,
         TRY_CAST(w.[Tapsi Incentive Type__Income Guarantee]             AS INT) AS tp_inc_guar,
         TRY_CAST(w.[Tapsi Incentive Type__Pay After Income]             AS INT) AS tp_pay_inc,
-        TRY_CAST(w.[Tapsi Incentive Type__Commission Free on some trips] AS INT) AS tp_cf_some
+        TRY_CAST(w.[Tapsi Incentive Type__Commission Free on some trips] AS INT) AS tp_cf_some,
+        TRY_CAST(w.[Snapp Incentive Type__Other]                        AS INT) AS sn_other,
+        TRY_CAST(w.[Tapsi Incentive Type__Other]                        AS INT) AS tp_other
     FROM [Cab].[DriverSurvey_ShortMain] m
     LEFT JOIN [Cab].[DriverSurvey_WideMain] w
         ON CAST(m.recordID AS INT) = CAST(w.recordID AS INT)
@@ -1542,6 +1544,9 @@ SELECT
     COUNT(*) AS n,
     SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END) AS n_joint,
     SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END) AS n_excl,
+    SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END) AS n_excl_gotmsg,
+    SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END) AS n_joint_gotmsg_sn,
+    SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END) AS n_joint_gotmsg_tp,
     -- Got-message rates by segment
     100.0*SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' THEN 1.0 ELSE 0.0 END)
         / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_GotMsg_Excl_Snapp,
@@ -1556,27 +1561,30 @@ SELECT
                     AND NOT (snapp_gotmessage_text_incentive='Yes' AND tapsi_gotmessage_text_incentive='Yes')
                    THEN 1.0 ELSE 0.0 END)
         / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_GotMsg_Diff,
-    -- Snapp Exclusive type breakdown (base = n_excl)
-    100.0*SUM(CASE WHEN is_joint=0 AND sn_pay_ride=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_PayRide_Excl,
-    100.0*SUM(CASE WHEN is_joint=0 AND sn_earn_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_EarnCF_Excl,
-    100.0*SUM(CASE WHEN is_joint=0 AND sn_ride_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_RideCF_Excl,
-    100.0*SUM(CASE WHEN is_joint=0 AND sn_inc_guar=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_IncGuar_Excl,
-    100.0*SUM(CASE WHEN is_joint=0 AND sn_pay_inc=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_PayInc_Excl,
-    100.0*SUM(CASE WHEN is_joint=0 AND sn_cf_some=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=0 THEN 1 ELSE 0 END),0) AS pct_CFSome_Excl,
-    -- Snapp Joint type breakdown (base = n_joint)
-    100.0*SUM(CASE WHEN is_joint=1 AND sn_pay_ride=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_PayRide_JntSn,
-    100.0*SUM(CASE WHEN is_joint=1 AND sn_earn_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_EarnCF_JntSn,
-    100.0*SUM(CASE WHEN is_joint=1 AND sn_ride_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_RideCF_JntSn,
-    100.0*SUM(CASE WHEN is_joint=1 AND sn_inc_guar=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_IncGuar_JntSn,
-    100.0*SUM(CASE WHEN is_joint=1 AND sn_pay_inc=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_PayInc_JntSn,
-    100.0*SUM(CASE WHEN is_joint=1 AND sn_cf_some=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_CFSome_JntSn,
-    -- Tapsi Joint type breakdown (base = n_joint)
-    100.0*SUM(CASE WHEN is_joint=1 AND tp_pay_ride=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_PayRide_JntTp,
-    100.0*SUM(CASE WHEN is_joint=1 AND tp_earn_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_EarnCF_JntTp,
-    100.0*SUM(CASE WHEN is_joint=1 AND tp_ride_cf=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_RideCF_JntTp,
-    100.0*SUM(CASE WHEN is_joint=1 AND tp_inc_guar=1 THEN 1.0 ELSE 0.0 END)  / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_IncGuar_JntTp,
-    100.0*SUM(CASE WHEN is_joint=1 AND tp_pay_inc=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_PayInc_JntTp,
-    100.0*SUM(CASE WHEN is_joint=1 AND tp_cf_some=1 THEN 1.0 ELSE 0.0 END)   / NULLIF(SUM(CASE WHEN is_joint=1 THEN 1 ELSE 0 END),0) AS pct_CFSome_JntTp,
+    -- Snapp Exclusive type breakdown (base = n_excl_gotmsg: gotmessage=Yes excl drivers)
+    100.0*SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' AND sn_pay_ride=1  THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_PayRide_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' AND sn_earn_cf=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_EarnCF_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' AND sn_ride_cf=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_RideCF_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' AND sn_inc_guar=1  THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_IncGuar_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' AND sn_pay_inc=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_PayInc_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' AND sn_cf_some=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_CFSome_Excl,
+    100.0*SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' AND sn_other=1     THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=0 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_Other_Excl,
+    -- Snapp Joint type breakdown (base = n_joint_gotmsg_sn: Snapp gotmessage=Yes joint drivers)
+    100.0*SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND sn_pay_ride=1  THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_PayRide_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND sn_earn_cf=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_EarnCF_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND sn_ride_cf=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_RideCF_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND sn_inc_guar=1  THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_IncGuar_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND sn_pay_inc=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_PayInc_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND sn_cf_some=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_CFSome_JntSn,
+    100.0*SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' AND sn_other=1     THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND snapp_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_Other_JntSn,
+    -- Tapsi Joint type breakdown (base = n_joint_gotmsg_tp: Tapsi gotmessage=Yes joint drivers)
+    100.0*SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_pay_ride=1  THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_PayRide_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_earn_cf=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_EarnCF_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_ride_cf=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_RideCF_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_inc_guar=1  THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_IncGuar_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_pay_inc=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_PayInc_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_cf_some=1   THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_CFSome_JntTp,
+    100.0*SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' AND tp_other=1     THEN 1.0 ELSE 0.0 END) / NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_gotmessage_text_incentive='Yes' THEN 1 ELSE 0 END),0) AS pct_Other_JntTp,
     -- Average commission-free rides (among drivers who did CF rides)
     AVG(CASE WHEN snapp_cf > 0 THEN snapp_cf END) AS Avg_CF_Rides_Snapp,
     AVG(CASE WHEN is_joint=1 AND tapsi_cf > 0 THEN tapsi_cf END) AS Avg_CF_Rides_Tapsi
@@ -1740,7 +1748,7 @@ WITH src AS (
 snapp_nav AS (
     SELECT
         CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-        yearweek AS yearweek_sort, weeknumber, city, 'Snapp' AS platform,
+        yearweek AS yearweek_sort, weeknumber, city, 'Snapp' AS platform, 1 AS platform_sort,
         SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL THEN 1 ELSE 0 END) AS n,
         100.0*SUM(CASE WHEN snapp_last_trip_navigation='Neshan'            THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Neshan,
         100.0*SUM(CASE WHEN snapp_last_trip_navigation='Balad'             THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN snapp_last_trip_navigation IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Balad,
@@ -1757,7 +1765,7 @@ snapp_nav AS (
 tapsi_nav AS (
     SELECT
         CAST(yearweek/100 AS VARCHAR) + '-' + RIGHT('0' + CAST(yearweek%100 AS VARCHAR), 2) AS yearweek,
-        yearweek AS yearweek_sort, weeknumber, city, 'Tapsi' AS platform,
+        yearweek AS yearweek_sort, weeknumber, city, 'Tapsi' AS platform, 2 AS platform_sort,
         SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type IS NOT NULL THEN 1 ELSE 0 END) AS n,
         100.0*SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type='Neshan'            THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Neshan,
         100.0*SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type='Balad'             THEN 1.0 ELSE 0.0 END)/NULLIF(SUM(CASE WHEN is_joint=1 AND tapsi_navigation_type IS NOT NULL THEN 1 ELSE 0 END),0) AS pct_Balad,
