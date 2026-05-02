@@ -742,7 +742,7 @@ dax_measure(wow_dax('RA10 WoW Snapp NPS', V, f'AVERAGE({V}[Snapp_NPS])'))
 # ════════════════════════════════════════════════════════════════════════════
 heading('13. RA-11 – Incentive Type Distribution', level=1)
 body('View: vw_RA_IncentiveTypes  |  Excel Pages: #5 (Snapp Excl), #6 (Joint)', bold=True)
-body('Multi-select incentive type flags (7 types × 3 segments). '
+body('Multi-select incentive type flags (6 types × 3 segments). '
      'Base for type %: n_excl_gotmsg (Excl), n_joint_gotmsg_sn (JntSn), n_joint_gotmsg_tp (JntTp) — '
      'only drivers who received a gotmessage incentive, matching Excel denominator.')
 body('Columns:', bold=True)
@@ -765,7 +765,6 @@ col_table(
         ('pct_IncGuar_Excl / JntSn / JntTp', 'FLOAT', 'Income Guarantee type %'),
         ('pct_PayInc_Excl / JntSn / JntTp', 'FLOAT', 'Pay After Income type %'),
         ('pct_CFSome_Excl / JntSn / JntTp', 'FLOAT', 'CF on Some Trips type %'),
-        ('pct_Other_Excl / JntSn / JntTp', 'FLOAT', 'Other incentive type %'),
         ('Avg_CF_Rides_Snapp', 'FLOAT', 'avg CF rides (CF drivers only)'),
         ('Avg_CF_Rides_Tapsi', 'FLOAT', ''),
     ]
@@ -788,7 +787,7 @@ dax_measure(metric_dax('RA11 pct GotMsg Both', V, f'AVERAGE({V}[pct_GotMsg_Both]
 dax_measure(metric_dax('RA11 pct GotMsg Diff', V, f'AVERAGE({V}[pct_GotMsg_Diff])', n_col='n_joint'))
 
 for seg, base in [('Excl', 'n_excl_gotmsg'), ('JntSn', 'n_joint_gotmsg_sn'), ('JntTp', 'n_joint_gotmsg_tp')]:
-    for t in ['PayRide', 'EarnCF', 'RideCF', 'IncGuar', 'PayInc', 'CFSome', 'Other']:
+    for t in ['PayRide', 'EarnCF', 'RideCF', 'IncGuar', 'PayInc', 'CFSome']:
         col = f'pct_{t}_{seg}'
         dax_measure(metric_dax(f'RA11 {col}', V, f'AVERAGE({V}[{col}])', n_col=base))
 
