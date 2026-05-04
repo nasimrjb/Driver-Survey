@@ -517,41 +517,89 @@ dax_measure(
 # ════════════════════════════════════════════════════════════════════════════
 heading('10. RA-8 – Commission-Free Incentive', level=1)
 body('View: vw_RA_CommFree  |  Excel Page: #18 (Snapp + Tapsi)', bold=True)
-body('UNION ALL of Snapp (all drivers) and Tapsi (joint only). '
-     'Incentive-type binary flags joined from WideMain. '
-     'Hardcode platform filter in each measure rather than using a slicer.')
-body('Columns:', bold=True)
+body('Mirrors Excel sheet #18 exactly. UNION ALL of two row sets per (yearweek, city):')
+bullet('SNAPP block (platform="Snapp", platform_sort=1) — denominator E = ALL drivers in city.')
+bullet('TAPSI block (platform="Tapsi", platform_sort=2) — denominator E = active_joint=1 drivers in city.')
+bullet('Filter [platform] in every measure (Excel-style hardcoding) rather than relying on a slicer, '
+       'so the same Matrix can show both side-by-side.')
+bullet('IMPORTANT: incentive category (Money / Free-Commission / Money & Free-commission) is RE-DERIVED '
+       'in the view from the WideMain binary type columns to match Excel exactly. '
+       'ShortMain.snapp_incentive_category / tapsi_incentive_category in the database are NOT used here — '
+       'they omit "Pay After Income" from the Money group, which would cause ~10 drivers/city '
+       'to be miscategorized vs Excel.')
+
+body('Excel cell → SQL column map:', bold=True)
+col_table(
+    ['Excel cell', 'Excel formula (Tapsi top / Snapp bottom)', 'SQL column'],
+    [
+        ('D', 'hardcoded population (not in survey)', '— (use DAX constant)'),
+        ('E',  'COUNTIFS(BK=city, BU=1) / COUNTIFS(BK=city)',  'n'),
+        ('F',  '+AJ=Yes / +I=Yes',                              'Who_Got_Message'),
+        ('G',  '+CP=Money / +CO=Money',                         'GotMsg_Money'),
+        ('H',  '+CP=Free-Commission / +CO=Free-Commission',     'GotMsg_FreeComm'),
+        ('I',  '+CP=Money & Free-commission',                   'GotMsg_Money_FreeComm'),
+        ('L',  'COUNTIFS(BK, BY>0) / COUNTIFS(BK, CA>0)',       'Free_Comm_Drivers'),
+        ('M',  'F/E',                                           'pct_Got_Message'),
+        ('N',  '(H+I)/F',                                       'pct_FreeComm_Message'),
+        ('O',  '(BU=1, BY>0) / E   |   (CA>0)/E',               'pct_Free_Comm_Ride'),
+        ('P',  '+AY=Yes (or +X=Yes for Snapp), CP=Money / G',   'pct_Part_Money'),
+        ('Q',  'same with cat=Free-Commission / H',             'pct_Part_FreeComm'),
+        ('R',  'same with cat=Money & Free-commission / I',     'pct_Part_Money_FreeComm'),
+        ('S',  'participated AND TYPE=Income Guarantee / GotMsg_IncGuar',  'pct_Part_IncGuar'),
+        ('T',  'participated AND TYPE=Pay After Ride / GotMsg_PayRide',    'pct_Part_PayRide'),
+        ('U',  'participated AND TYPE=Pay After Income / GotMsg_PayInc',   'pct_Part_PayInc'),
+        ('V',  '+CP="*", AY=Yes / F   (any category, participated)', 'pct_Participated'),
+        ('AA', 'SUMIF(BK, BW) / SUMIF(BK, BV)',                 'Ride_Total'),
+        ('AB', 'SUMIFS(BW, BK, BY>0) / SUMIFS(BV, BK, CA>0)',   'Ride_AmongFC'),
+        ('AC', 'SUMIF(BK, BY) / SUMIF(BK, CA)',                 'Ride_FreeComm'),
+        ('AD', 'AC/AA',                                         'pct_FCRide_AllShare'),
+        ('AE', 'AC/AB',                                         'pct_FCRide_FCShare'),
+        ('W,X,Y,Z,AF,AG', 'depend on hardcoded constants D, X, Y, Z',
+         'compute in DAX (see Cost Measures below)'),
+    ]
+)
+doc.add_paragraph()
+
+body('Columns in vw_RA_CommFree:', bold=True)
 col_table(
     ['Column', 'Type', 'Notes'],
     [
         ('yearweek / yearweek_sort / weeknumber / city', '', ''),
-        ('platform', 'TEXT', '"Snapp" or "Tapsi"'),
-        ('platform_sort', 'INT', '1=Snapp, 2=Tapsi — use to sort platform in Matrix Columns'),
-        ('n', 'INT', 'base respondents (all for Snapp; joint only for Tapsi)'),
-        ('Who_Got_Message', 'INT', 'received incentive message'),
-        ('GotMsg_Money', 'INT', 'msg received, category = Money'),
-        ('GotMsg_FreeComm', 'INT', 'msg received, category = Free-Commission'),
-        ('GotMsg_Money_FreeComm', 'INT', 'msg received, category = Money & Free-commission'),
-        ('GotMsg_PayRide', 'INT', 'received msg + Pay After Ride type'),
-        ('GotMsg_EarnCF', 'INT', 'received msg + Earning-Based CF type'),
-        ('GotMsg_RideCF', 'INT', 'received msg + Ride-Based CF type'),
-        ('GotMsg_IncGuar', 'INT', 'received msg + Income Guarantee type'),
-        ('GotMsg_PayInc', 'INT', 'received msg + Pay After Income type'),
-        ('GotMsg_CFSome', 'INT', 'received msg + CF Some Trips type'),
-        ('Free_Comm_Drivers', 'INT', 'drivers with CF rides > 0'),
-        ('Participated', 'INT', 'participated in incentive'),
-        ('pct_Got_Message', 'FLOAT', '% of n who got message'),
-        ('pct_Free_Comm_Ride', 'FLOAT', '% of n with CF rides > 0'),
-        ('pct_Participated', 'FLOAT', '% of Who_Got_Message who participated'),
-        ('Avg_CF_Rides', 'FLOAT', 'avg CF rides among CF drivers only'),
-        ('Avg_Total_Rides', 'FLOAT', 'avg total rides'),
-        ('Avg_pct_CF_RideShare', 'FLOAT', 'avg CF% of total rides'),
+        ('platform / platform_sort', 'TEXT/INT', '"Snapp" (1) or "Tapsi" (2)'),
+        ('n', 'INT', 'Excel E — Snapp: all drivers; Tapsi: active_joint=1'),
+        ('Who_Got_Message', 'INT', 'Excel F — gotmessage=Yes count'),
+        ('GotMsg_Money / FreeComm / Money_FreeComm', 'INT', 'Excel G/H/I — by incentive_category'),
+        ('GotMsg_PayRide / EarnCF / RideCF / IncGuar / PayInc / CFSome', 'INT',
+         'multi-select TYPE breakdown (not in #18 but useful)'),
+        ('Free_Comm_Drivers', 'INT', 'Excel L — commfree>0 count (no joint filter)'),
+        ('Part_Money / Part_FreeComm / Part_Money_FreeComm', 'INT',
+         'numerators for P/Q/R — participated by category'),
+        ('Part_IncGuar / Part_PayRide / Part_PayInc', 'INT',
+         'numerators for S/T/U — participated by incentive TYPE (multi-select)'),
+        ('Participated', 'INT', 'Excel V numerator — got msg + any category + participated'),
+        ('pct_Got_Message', 'FLOAT', 'Excel M = F/E × 100'),
+        ('pct_FreeComm_Message', 'FLOAT', 'Excel N = (H+I)/F × 100'),
+        ('pct_Free_Comm_Ride', 'FLOAT', 'Excel O = (commfree>0)/E × 100'),
+        ('pct_Part_Money / FreeComm / Money_FreeComm', 'FLOAT', 'Excel P/Q/R — by category'),
+        ('pct_Part_IncGuar / PayRide / PayInc', 'FLOAT', 'Excel S/T/U — by incentive TYPE'),
+        ('pct_Participated', 'FLOAT', 'Excel V'),
+        ('Ride_Total', 'FLOAT', 'Excel AA = SUM(ride)'),
+        ('Ride_AmongFC', 'FLOAT', 'Excel AB = SUM(ride WHERE commfree>0)'),
+        ('Ride_FreeComm', 'FLOAT', 'Excel AC = SUM(commfree)'),
+        ('pct_FCRide_AllShare', 'FLOAT', 'Excel AD = AC/AA × 100'),
+        ('pct_FCRide_FCShare', 'FLOAT', 'Excel AE = AC/AB × 100'),
+        ('Avg_CF_Rides / Avg_Total_Rides / Avg_pct_CF_RideShare', 'FLOAT',
+         'legacy averages (kept for back-compat)'),
     ]
 )
 doc.add_paragraph()
 body('DAX Measures:', bold=True)
+note('All measures hard-filter [platform]. Build twin matrices (one per platform) or '
+     'use a Calculation Group if you want a single matrix that switches by platform.')
 
 V = 'vw_RA_CommFree'
+
+# n / Who Got Message — count measures per platform
 for plat in ('Snapp', 'Tapsi'):
     dax_measure(
         f'RA8 n ({plat}) =\n'
@@ -561,79 +609,80 @@ for plat in ('Snapp', 'Tapsi'):
         f'    {V}[platform] = "{plat}")'
     )
     dax_measure(
-        f'RA8 pct Got Message ({plat}) =\n'
+        f'RA8 Who Got Message ({plat}) =\n'
         f'{yw_var(V)}\n'
-        f'VAR MinN = [Min N Cutoff Value]\n'
-        f'RETURN IF(\n'
-        f'    CALCULATE(SUM({V}[n]),\n'
-        f'        {V}[yearweek] = SelYearWeek,\n'
-        f'        {V}[platform] = "{plat}") >= MinN,\n'
-        f'    CALCULATE(AVERAGE({V}[pct_Got_Message]),\n'
-        f'        {V}[yearweek] = SelYearWeek,\n'
-        f'        {V}[platform] = "{plat}"),\n'
-        f'    BLANK())'
+        f'RETURN CALCULATE(SUM({V}[Who_Got_Message]),\n'
+        f'    {V}[yearweek] = SelYearWeek,\n'
+        f'    {V}[platform] = "{plat}")'
     )
-    dax_measure(
-        f'RA8 pct Free Comm Ride ({plat}) =\n'
+
+# Helper: build a [platform]-filtered pct measure with MinN gate on n
+def pct_with_n_gate(name, plat, src_col):
+    return (
+        f'RA8 {name} ({plat}) =\n'
         f'{yw_var(V)}\n'
         f'VAR MinN = [Min N Cutoff Value]\n'
         f'RETURN IF(\n'
         f'    CALCULATE(SUM({V}[n]),\n'
         f'        {V}[yearweek] = SelYearWeek,\n'
         f'        {V}[platform] = "{plat}") >= MinN,\n'
-        f'    CALCULATE(AVERAGE({V}[pct_Free_Comm_Ride]),\n'
-        f'        {V}[yearweek] = SelYearWeek,\n'
-        f'        {V}[platform] = "{plat}"),\n'
-        f'    BLANK())'
-    )
-    dax_measure(
-        f'RA8 pct Participated ({plat}) =\n'
-        f'{yw_var(V)}\n'
-        f'VAR MinN = [Min N Cutoff Value]\n'
-        f'RETURN IF(\n'
-        f'    CALCULATE(SUM({V}[n]),\n'
-        f'        {V}[yearweek] = SelYearWeek,\n'
-        f'        {V}[platform] = "{plat}") >= MinN,\n'
-        f'    CALCULATE(AVERAGE({V}[pct_Participated]),\n'
+        f'    CALCULATE(AVERAGE({V}[{src_col}]),\n'
         f'        {V}[yearweek] = SelYearWeek,\n'
         f'        {V}[platform] = "{plat}"),\n'
         f'    BLANK())'
     )
 
-CF_TYPES = [
-    ('PayRide',  'GotMsg_PayRide'),
-    ('EarnCF',   'GotMsg_EarnCF'),
-    ('RideCF',   'GotMsg_RideCF'),
-    ('IncGuar',  'GotMsg_IncGuar'),
-    ('PayInc',   'GotMsg_PayInc'),
-    ('CFSome',   'GotMsg_CFSome'),
-]
+# Helper: pct measure with MinN gate on Who_Got_Message (for participation by-category)
+def pct_with_whogot_gate(name, plat, src_col, gate_col='Who_Got_Message'):
+    return (
+        f'RA8 {name} ({plat}) =\n'
+        f'{yw_var(V)}\n'
+        f'VAR MinN = [Min N Cutoff Value]\n'
+        f'RETURN IF(\n'
+        f'    CALCULATE(SUM({V}[{gate_col}]),\n'
+        f'        {V}[yearweek] = SelYearWeek,\n'
+        f'        {V}[platform] = "{plat}") >= MinN,\n'
+        f'    CALCULATE(AVERAGE({V}[{src_col}]),\n'
+        f'        {V}[yearweek] = SelYearWeek,\n'
+        f'        {V}[platform] = "{plat}"),\n'
+        f'    BLANK())'
+    )
+
+# Excel M, N, O, V — gated on n
 for plat in ('Snapp', 'Tapsi'):
-    for short_name, col in CF_TYPES:
-        dax_measure(
-            f'RA8 pct {short_name} ({plat}) =\n'
-            f'{yw_var(V)}\n'
-            f'VAR WhoGot = CALCULATE(SUM({V}[Who_Got_Message]),\n'
-            f'    {V}[yearweek] = SelYearWeek, {V}[platform] = "{plat}")\n'
-            f'VAR MinN = [Min N Cutoff Value]\n'
-            f'VAR NType = CALCULATE(SUM({V}[{col}]),\n'
-            f'    {V}[yearweek] = SelYearWeek, {V}[platform] = "{plat}")\n'
-            f'RETURN IF(WhoGot >= MinN, DIVIDE(NType, WhoGot) * 100, BLANK())'
-        )
-    dax_measure(
-        f'RA8 Avg CF Rides ({plat}) =\n'
-        f'{yw_var(V)}\n'
-        f'VAR MinN = [Min N Cutoff Value]\n'
-        f'RETURN IF(\n'
-        f'    CALCULATE(SUM({V}[n]),\n'
-        f'        {V}[yearweek] = SelYearWeek,\n'
-        f'        {V}[platform] = "{plat}") >= MinN,\n'
-        f'    CALCULATE(AVERAGE({V}[Avg_CF_Rides]),\n'
-        f'        {V}[yearweek] = SelYearWeek,\n'
-        f'        {V}[platform] = "{plat}"),\n'
-        f'    BLANK())'
-    )
+    dax_measure(pct_with_n_gate('pct Got Message',     plat, 'pct_Got_Message'))
+    dax_measure(pct_with_n_gate('pct FreeComm Message', plat, 'pct_FreeComm_Message'))
+    dax_measure(pct_with_n_gate('pct Free Comm Ride',  plat, 'pct_Free_Comm_Ride'))
+    dax_measure(pct_with_n_gate('pct Participated',    plat, 'pct_Participated'))
 
+# Excel P/Q/R — gated on GotMsg_<cat> (denominator)
+for plat in ('Snapp', 'Tapsi'):
+    dax_measure(pct_with_whogot_gate('pct Part Money',           plat, 'pct_Part_Money',           'GotMsg_Money'))
+    dax_measure(pct_with_whogot_gate('pct Part FreeComm',        plat, 'pct_Part_FreeComm',        'GotMsg_FreeComm'))
+    dax_measure(pct_with_whogot_gate('pct Part Money FreeComm',  plat, 'pct_Part_Money_FreeComm',  'GotMsg_Money_FreeComm'))
+
+# Excel S/T/U — gated on GotMsg_<type> (multi-select TYPE breakdown)
+for plat in ('Snapp', 'Tapsi'):
+    dax_measure(pct_with_whogot_gate('pct Part IncGuar', plat, 'pct_Part_IncGuar', 'GotMsg_IncGuar'))
+    dax_measure(pct_with_whogot_gate('pct Part PayRide', plat, 'pct_Part_PayRide', 'GotMsg_PayRide'))
+    dax_measure(pct_with_whogot_gate('pct Part PayInc',  plat, 'pct_Part_PayInc',  'GotMsg_PayInc'))
+
+# Ride sums (no MinN gate — these are population sums, not survey ratios)
+for plat in ('Snapp', 'Tapsi'):
+    for short, col in [('Ride Total', 'Ride_Total'),
+                       ('Ride AmongFC', 'Ride_AmongFC'),
+                       ('Ride FreeComm', 'Ride_FreeComm')]:
+        dax_measure(
+            f'RA8 {short} ({plat}) =\n'
+            f'{yw_var(V)}\n'
+            f'RETURN CALCULATE(SUM({V}[{col}]),\n'
+            f'    {V}[yearweek] = SelYearWeek,\n'
+            f'    {V}[platform] = "{plat}")'
+        )
+    dax_measure(pct_with_n_gate('pct FCRide AllShare', plat, 'pct_FCRide_AllShare'))
+    dax_measure(pct_with_n_gate('pct FCRide FCShare',  plat, 'pct_FCRide_FCShare'))
+
+# WoW examples
 dax_measure(
     f'RA8 WoW pct Got Message (Snapp) =\n'
     f'{yw_var(V)}\n'
@@ -651,8 +700,71 @@ dax_measure(
     f'    CurrVal - PrevVal,\n'
     f'    BLANK())'
 )
-note('Duplicate WoW pattern for pct_Free_Comm_Ride, pct_Participated, Avg_CF_Rides. Apply same pattern to Tapsi.')
-note('Visual: Matrix with city rows. Cards for national pct_Got_Message / pct_Free_Comm_Ride.')
+note('Apply the same WoW pattern to any other pct_* measure by swapping the source column. '
+     'Apply the same pattern for Tapsi by swapping "Snapp" → "Tapsi".')
+
+doc.add_paragraph()
+body('Cost Measures (Excel AF / AG / W) — require hardcoded constants:', bold=True)
+note('Excel AF/AG/W use four constants per (city, platform) that are NOT in the survey:\n'
+     '  D = total active driver population (e.g. 107,326 for Tapsi Tehran)\n'
+     '  X = rides per board (e.g. 11.85 for Tapsi Tehran, 21.66 for Snapp Tehran)\n'
+     '  Y = commission % (typically 0.15)\n'
+     '  Z = avg fare in Rial (e.g. 1,117,997 for Tapsi Tehran)\n'
+     'Add these as a separate Power BI table (Constants) keyed on (city, platform), '
+     'or as DAX SWITCH() against city. Below is the formula skeleton — replace VAR D / X / Y / Z '
+     'with your constants table lookups.')
+
+dax_measure(
+    'RA8 final drivers (Tapsi) =\n'
+    '// Excel W = O × D — population estimate × % who had a Free-Commission ride\n'
+    f'{yw_var(V)}\n'
+    'VAR D = [Total Driver Pop (Tapsi)]   // your constants lookup\n'
+    'VAR PctO = CALCULATE(AVERAGE(vw_RA_CommFree[pct_Free_Comm_Ride]),\n'
+    '    vw_RA_CommFree[yearweek] = SelYearWeek,\n'
+    '    vw_RA_CommFree[platform] = "Tapsi")\n'
+    'RETURN D * PctO / 100'
+)
+dax_measure(
+    'RA8 Commission Free Cost #1 (Tapsi) =\n'
+    '// Excel AF = D × M × N × AVG(Q,R) × X × AE × Y × Z\n'
+    f'{yw_var(V)}\n'
+    'VAR D = [Total Driver Pop (Tapsi)]\n'
+    'VAR X = [Rides per Brd (Tapsi)]\n'
+    'VAR Y = [Commission Pct (Tapsi)]   // e.g. 0.15\n'
+    'VAR Z = [Avg Fare (Tapsi)]\n'
+    'VAR M = CALCULATE(AVERAGE(vw_RA_CommFree[pct_Got_Message]),\n'
+    '    vw_RA_CommFree[yearweek] = SelYearWeek, vw_RA_CommFree[platform] = "Tapsi") / 100\n'
+    'VAR N = CALCULATE(AVERAGE(vw_RA_CommFree[pct_FreeComm_Message]),\n'
+    '    vw_RA_CommFree[yearweek] = SelYearWeek, vw_RA_CommFree[platform] = "Tapsi") / 100\n'
+    'VAR Q = CALCULATE(AVERAGE(vw_RA_CommFree[pct_Part_FreeComm]),\n'
+    '    vw_RA_CommFree[yearweek] = SelYearWeek, vw_RA_CommFree[platform] = "Tapsi") / 100\n'
+    'VAR R = CALCULATE(AVERAGE(vw_RA_CommFree[pct_Part_Money_FreeComm]),\n'
+    '    vw_RA_CommFree[yearweek] = SelYearWeek, vw_RA_CommFree[platform] = "Tapsi") / 100\n'
+    'VAR AE = CALCULATE(AVERAGE(vw_RA_CommFree[pct_FCRide_FCShare]),\n'
+    '    vw_RA_CommFree[yearweek] = SelYearWeek, vw_RA_CommFree[platform] = "Tapsi") / 100\n'
+    'VAR PartAvgQR = DIVIDE(Q + R, 2)\n'
+    'RETURN D * M * N * PartAvgQR * X * AE * Y * Z'
+)
+dax_measure(
+    'RA8 Commission Free Cost #2 (Tapsi) =\n'
+    '// Excel AG = D × O × X × AE × Y × Z (simpler ride-based estimate)\n'
+    f'{yw_var(V)}\n'
+    'VAR D = [Total Driver Pop (Tapsi)]\n'
+    'VAR X = [Rides per Brd (Tapsi)]\n'
+    'VAR Y = [Commission Pct (Tapsi)]\n'
+    'VAR Z = [Avg Fare (Tapsi)]\n'
+    'VAR O = CALCULATE(AVERAGE(vw_RA_CommFree[pct_Free_Comm_Ride]),\n'
+    '    vw_RA_CommFree[yearweek] = SelYearWeek, vw_RA_CommFree[platform] = "Tapsi") / 100\n'
+    'VAR AE = CALCULATE(AVERAGE(vw_RA_CommFree[pct_FCRide_FCShare]),\n'
+    '    vw_RA_CommFree[yearweek] = SelYearWeek, vw_RA_CommFree[platform] = "Tapsi") / 100\n'
+    'RETURN D * O * X * AE * Y * Z'
+)
+note('Duplicate the three cost measures for Snapp by replacing "Tapsi" → "Snapp" and pointing '
+     'to the corresponding Snapp constants. Excel calibrates AH = AF × (AJ45/AF45) where AJ45 '
+     'is a ground-truth total cost from accounting (e.g. 227,140,884,338 Rial in week 52). '
+     'If you have that ground truth, build it as a separate parameter and multiply.')
+note('Visual: Two side-by-side matrices (Snapp & Tapsi) with city rows + cards for national totals. '
+     'For the cost columns, build a separate "Constants" table with one row per (city, platform).')
 
 # ════════════════════════════════════════════════════════════════════════════
 # RA-9  vw_RA_CSRare
@@ -799,23 +911,31 @@ dax_measure(metric_dax('RA11 Avg CF Rides Tapsi', V, f'AVERAGE({V}[Avg_CF_Rides_
 # ════════════════════════════════════════════════════════════════════════════
 heading('14. RA-12 – Incentive Dissatisfaction by City', level=1)
 body('View: vw_RA_IncentiveUnsatCity  |  Excel Page: #8', bold=True)
-body('"Low sat" = driver cited ANY unsatisfaction reason (multi-select from WideMain). '
-     'Snapp base = n_sn_low_sat; Tapsi base = n_tp_low_sat (joint only).')
+body('"Low rate" = driver gave incentive satisfaction rating < 4 (i.e. 1, 2, or 3). MATCHES EXCEL #8.')
+bullet('Snapp denominator = n_sn_lowrate = drivers with snapp_overall_incentive_satisfaction < 4')
+bullet('Tapsi denominator = n_tp_lowrate = JOINT drivers with tapsi_overall_incentive_satisfaction < 4')
+bullet('Numerator = drivers with rating < 4 AND cited specific reason (multi-select WideMain flag = 1)')
+bullet('IMPORTANT: this is NOT the same as "drivers who cited any reason". Some drivers rated < 4 '
+       'but didn\'t pick any reason; some picked a reason but rated >= 4. Excel uses the rating filter, '
+       'so we match it.')
+note('Back-compat: aliases n_sn_low_sat / n_tp_low_sat are kept (= n_sn_lowrate / n_tp_lowrate) so '
+     'existing measures referencing the old names continue to work.')
 body('Columns:', bold=True)
 col_table(
     ['Column', 'Type', 'Notes'],
     [
         ('yearweek / yearweek_sort / weeknumber / city', '', ''),
-        ('n_all', 'INT', 'all respondents'),
+        ('n_all', 'INT', 'all respondents in city'),
         ('n_joint', 'INT', 'joint drivers'),
-        ('n_sn_low_sat', 'INT', 'Snapp dissatisfied (cited any reason)'),
-        ('n_tp_low_sat', 'INT', 'Tapsi dissatisfied joint drivers'),
-        ('pct_Sn_NoTime', 'FLOAT', '% of n_sn_low_sat citing "Not Available"'),
+        ('n_sn_lowrate', 'INT', 'Excel "sn<4" — drivers with Snapp rating < 4'),
+        ('n_tp_lowrate', 'INT', 'Excel "t30<4" — joint drivers with Tapsi rating < 4'),
+        ('n_sn_low_sat / n_tp_low_sat', 'INT', 'aliases of the above (back-compat)'),
+        ('pct_Sn_NoTime', 'FLOAT', '% of n_sn_lowrate citing "Not Available"'),
         ('pct_Sn_ImpAmt', 'FLOAT', '% citing "Improper Amount"'),
         ('pct_Sn_LowTime', 'FLOAT', '% citing "No Time todo"'),
         ('pct_Sn_HardToDo', 'FLOAT', '% citing "difficult"'),
         ('pct_Sn_NonPay', 'FLOAT', '% citing "Non Payment"'),
-        ('pct_Tp_NoTime', 'FLOAT', '% of n_tp_low_sat citing each Tapsi reason'),
+        ('pct_Tp_NoTime', 'FLOAT', '% of n_tp_lowrate citing each Tapsi reason'),
         ('pct_Tp_ImpAmt / pct_Tp_LowTime / pct_Tp_HardToDo / pct_Tp_NonPay', 'FLOAT', ''),
     ]
 )
@@ -848,7 +968,11 @@ for col, label in [
 # ════════════════════════════════════════════════════════════════════════════
 heading('15. RA-13 – Incentive Dissatisfaction (National)', level=1)
 body('View: vw_RA_IncentiveUnsatNational  |  Excel Page: #9', bold=True)
-body('Long format – no city column. Segments: All Snapp / Joint Snapp / Joint Tapsi.')
+body('Long format – no city column. Segments: All Snapp / Joint Snapp / Joint Tapsi. '
+     'MATCHES EXCEL #9 — denominator is rating-based (rating < 4), NOT "cited any reason":')
+bullet('All Snapp:   n_low_sat = COUNT(snapp_overall_incentive_satisfaction < 4)')
+bullet('Joint Snapp: n_low_sat = COUNT(active_joint=1 AND snapp rating < 4)')
+bullet('Joint Tapsi: n_low_sat = COUNT(active_joint=1 AND tapsi rating < 4)')
 body('Columns:', bold=True)
 col_table(
     ['Column', 'Type', 'Notes'],
@@ -857,7 +981,7 @@ col_table(
         ('segment', 'TEXT', '"All Snapp", "Joint Snapp", "Joint Tapsi"'),
         ('segment_sort', 'INT', '1, 2, 3'),
         ('n', 'INT', 'total respondents in segment'),
-        ('n_low_sat', 'INT', 'dissatisfied drivers in segment'),
+        ('n_low_sat', 'INT', 'drivers with rating < 4 in segment (Excel denominator)'),
         ('pct_NoTime', 'FLOAT', '% of n_low_sat citing "Not Available"'),
         ('pct_ImpAmt', 'FLOAT', '% citing "Improper Amount"'),
         ('pct_LowTime', 'FLOAT', '% citing "No Time todo"'),
@@ -1010,6 +1134,8 @@ body('DAX Measures:', bold=True)
 V = 'vw_RA_Referral'
 dax_measure(count_dax('RA15 n Snapp', V, count_col='n_Snapp'))
 dax_measure(count_dax('RA15 n Tapsi', V, count_col='n_Tapsi'))
+dax_measure(count_dax('RA15 joining Snapp', V, count_col='joining_Snapp'))
+dax_measure(count_dax('RA15 joining Tapsi', V, count_col='joining_Tapsi'))
 dax_measure(metric_dax('RA15 pct Joining Snapp', V, f'AVERAGE({V}[pct_Joining_Snapp])', n_col='n_Snapp'))
 dax_measure(metric_dax('RA15 pct Joining Tapsi', V, f'AVERAGE({V}[pct_Joining_Tapsi])', n_col='n_Tapsi'))
 dax_measure(wow_dax('RA15 WoW pct Joining Snapp', V, f'AVERAGE({V}[pct_Joining_Snapp])', n_col='n_Snapp'))
@@ -1021,7 +1147,10 @@ note('Visual: Matrix with city rows. Cards for national joining pct. Line chart 
 # ════════════════════════════════════════════════════════════════════════════
 heading('18. RA-16 – Tapsi Inactivity Before Incentive', level=1)
 body('View: vw_RA_TapsiInactivity  |  Excel Page: #17', bold=True)
-body('Joint drivers only. Long format with inactivity time bucket before receiving the incentive.')
+body('Long format with inactivity time bucket. Matches Excel #17 exactly:')
+bullet('Filter (numerator): tapsi_gotmessage_text_incentive=\'Yes\' AND bucket = X')
+bullet('n_total / "res" (denominator): joint_by_signup=1 AND tapsi_gotmessage_text_incentive=\'Yes\'')
+bullet('NOTE: uses joint_by_signup, NOT active_joint — the latter is stricter and returns ~30% fewer drivers.')
 body('Columns:', bold=True)
 col_table(
     ['Column', 'Type', 'Notes'],
@@ -1038,9 +1167,28 @@ col_table(
 )
 doc.add_paragraph()
 body('DAX Measures:', bold=True)
-note('Sort inactivity_bucket by bucket_sort in the Model view.')
+note('Sort inactivity_bucket by bucket_sort in the Model view (so columns appear in chronological order).')
+note('PREFERRED Matrix layout (matches Excel #17): Rows = city, Columns = inactivity_bucket, '
+     'Values = single [pct Bucket] measure → produces all 9 bucket columns auto-summing to 100% per row. '
+     'The 9 explicit per-bucket measures below are provided for cases where you want fixed columns '
+     '(e.g. cards or a flat table) instead of using inactivity_bucket on the columns axis.')
 
 V = 'vw_RA_TapsiInactivity'
+
+BUCKETS = [
+    ('Same Day',          '<1 day'),
+    ('1_3 Day Before',    '1-3 days'),
+    ('3_7 Days Before',   '4-7 days'),
+    ('8_14 Days Before',  '8-14 days'),
+    ('15_30 Days_Before', '15-30 days'),
+    ('1_2 Month Before',  '1-2 months'),
+    ('2_3 Month Before',  '2-3 months'),
+    ('3_6Month Before',   '3-6 months'),
+    ('>6 Month Before',   '>6 months'),
+]
+LT_1MONTH = [b[0] for b in BUCKETS[:5]]   # Same Day .. 15_30 Days_Before
+GT_1MONTH = [b[0] for b in BUCKETS[5:]]   # 1_2 Month .. >6 Month
+
 dax_measure(
     f'RA16 n Total =\n'
     f'{yw_var(V)}\n'
@@ -1048,7 +1196,8 @@ dax_measure(
 )
 dax_measure(
     f'RA16 pct Bucket =\n'
-    f'// Matrix: rows = city, columns = inactivity_bucket (sorted by bucket_sort)\n'
+    f'// Use this single measure with inactivity_bucket on the Matrix Columns well\n'
+    f'// (rows = city, sorted by bucket_sort). Each cell = % of city drivers in that bucket.\n'
     f'{yw_var(V)}\n'
     f'VAR MinN = [Min N Cutoff Value]\n'
     f'RETURN IF(\n'
@@ -1059,10 +1208,10 @@ dax_measure(
     f'    BLANK())'
 )
 
-for bucket in ['Same Day', '1_3 Day Before', '>6 Month Before']:
-    safe = bucket.replace(' ', '_').replace('>', 'gt')
+# Explicit per-bucket measures so the user can build a flat table matching Excel #17
+for bucket, label in BUCKETS:
     dax_measure(
-        f'RA16 pct {bucket} =\n'
+        f'RA16 pct {label} =\n'
         f'{yw_var(V)}\n'
         f'VAR MinN = [Min N Cutoff Value]\n'
         f'RETURN IF(\n'
@@ -1076,8 +1225,43 @@ for bucket in ['Same Day', '1_3 Day Before', '>6 Month Before']:
         f'    BLANK())'
     )
 
+# <1 Month / >1 Months summary (matches the small bottom table in Excel #17)
+def _bucket_list_dax(buckets):
+    return ', '.join(f'"{b}"' for b in buckets)
+
 dax_measure(
-    f'RA16 WoW pct Same Day =\n'
+    f'RA16 pct <1 Month =\n'
+    f'// Sum of "<1 day" through "15-30 days" — matches Excel "<1 Month" column\n'
+    f'{yw_var(V)}\n'
+    f'VAR MinN = [Min N Cutoff Value]\n'
+    f'RETURN IF(\n'
+    f'    CALCULATE(MAX({V}[n_total]), {V}[yearweek] = SelYearWeek) >= MinN,\n'
+    f'    DIVIDE(\n'
+    f'        CALCULATE(SUM({V}[n]),\n'
+    f'            {V}[yearweek] = SelYearWeek,\n'
+    f'            {V}[inactivity_bucket] IN {{{_bucket_list_dax(LT_1MONTH)}}}),\n'
+    f'        CALCULATE(MAX({V}[n_total]),\n'
+    f'            {V}[yearweek] = SelYearWeek)) * 100,\n'
+    f'    BLANK())'
+)
+dax_measure(
+    f'RA16 pct >1 Months =\n'
+    f'// Sum of "1-2 months" through ">6 months" — matches Excel ">1 Months" column\n'
+    f'{yw_var(V)}\n'
+    f'VAR MinN = [Min N Cutoff Value]\n'
+    f'RETURN IF(\n'
+    f'    CALCULATE(MAX({V}[n_total]), {V}[yearweek] = SelYearWeek) >= MinN,\n'
+    f'    DIVIDE(\n'
+    f'        CALCULATE(SUM({V}[n]),\n'
+    f'            {V}[yearweek] = SelYearWeek,\n'
+    f'            {V}[inactivity_bucket] IN {{{_bucket_list_dax(GT_1MONTH)}}}),\n'
+    f'        CALCULATE(MAX({V}[n_total]),\n'
+    f'            {V}[yearweek] = SelYearWeek)) * 100,\n'
+    f'    BLANK())'
+)
+
+dax_measure(
+    f'RA16 WoW pct <1 day =\n'
     f'{yw_var(V)}\n'
     f'VAR PrevYearWeek = CALCULATE(MAX({V}[yearweek]),\n'
     f'    ALL({V}), {V}[yearweek] < SelYearWeek)\n'
@@ -1095,23 +1279,31 @@ dax_measure(
     f'    CurrVal - PrevVal,\n'
     f'    BLANK())'
 )
-note('Visual: Clustered/Stacked bar – inactivity_bucket on x-axis, city as legend or matrix rows.')
+note('Apply the same WoW pattern to any other bucket by swapping "Same Day" for the target bucket value.')
+note('To match Excel #17 exactly: Matrix with city rows + inactivity_bucket columns + [pct Bucket] in Values. '
+     'Add a small companion table/cards for [pct <1 Month] and [pct >1 Months] below.')
 
 # ════════════════════════════════════════════════════════════════════════════
 # RA-17  vw_RA_LuckyWheel
 # ════════════════════════════════════════════════════════════════════════════
 heading('19. RA-17 – Lucky Wheel Usage', level=1)
 body('View: vw_RA_LuckyWheel  |  Excel Page: #19', bold=True)
-body('wheel column = Rial amount won; 0 = did not use.')
+body('Matches Excel #19 exactly:')
+bullet('n = COUNT(active_joint=1) per city — denominator for pct_usage')
+bullet('n_users = COUNT(active_joint=1 AND tapsi_magical_window=\'Yes\') — Excel "Res Usage"')
+bullet('pct_usage = n_users / n × 100 — Excel "Usage" column')
+bullet('avg_wheel_amount = AVG(wheel) over active_joint drivers (NULLs skipped, 0s included) — Excel "Ave. Lucky wheel"')
+bullet('IMPORTANT: usage = answered "Yes" to the lucky-wheel question, NOT wheel>0 (= won money). '
+       'A driver can use the wheel and win 0.')
 body('Columns:', bold=True)
 col_table(
     ['Column', 'Type', 'Notes'],
     [
         ('yearweek / yearweek_sort / weeknumber / city', '', ''),
-        ('n', 'INT', 'all respondents'),
-        ('n_users', 'INT', 'drivers who used Lucky Wheel (wheel > 0)'),
-        ('pct_usage', 'FLOAT', '% who used the wheel'),
-        ('avg_wheel_amount', 'FLOAT', 'avg Rial amount among users only'),
+        ('n', 'INT', 'active_joint drivers in city — Usage % denominator'),
+        ('n_users', 'INT', 'active_joint AND tapsi_magical_window=Yes — Excel Res Usage'),
+        ('pct_usage', 'FLOAT', '% who used the wheel (Excel Usage)'),
+        ('avg_wheel_amount', 'FLOAT', 'avg wheel amount over all active_joint (Excel Ave. Lucky wheel)'),
     ]
 )
 doc.add_paragraph()
